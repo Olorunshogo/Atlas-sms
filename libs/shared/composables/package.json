@@ -1,0 +1,18 @@
+{
+  "name": "@atlas/composables",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "peerDependencies": {
+    "nuxt": "^4.4.8",
+    "vue": "^3.5.38"
+  },
+  "nx": {
+    "tags": [
+      "type:util"
+    ]
+  }
+}

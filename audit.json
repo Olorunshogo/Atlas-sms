@@ -1,0 +1,61 @@
+{
+  "keepSettings": {
+    "type": 2,
+    "amount": 10
+  },
+  "auditFilename": "audit.json",
+  "hashType": "md5",
+  "extension": "",
+  "files": [
+    {
+      "date": 1773660181360,
+      "name": "./tmp/test-2026-03-16.log.0",
+      "hash": "ea962e6ee90fccb7eebacdb80843db7f"
+    },
+    {
+      "date": 1773771408679,
+      "name": "./tmp/test-2026-03-17.log.0",
+      "hash": "8c841f59e3fa9abd4f227407c0da9ad1"
+    },
+    {
+      "date": 1773771508790,
+      "name": "./tmp/test-2026-03-17.log.2026",
+      "hash": "b368d856c956378abcbbf5baf9447f78"
+    },
+    {
+      "date": 1774137411978,
+      "name": "./tmp/test-2026-03-22.log.0",
+      "hash": "f51734bceb6e7e8ddaaaecbdabe00a9d"
+    },
+    {
+      "date": 1774428653905,
+      "name": "./tmp/test-2026-03-25.log.0",
+      "hash": "65aa852db8206abaa79a1a36d776c7cb"
+    },
+    {
+      "date": 1774428664803,
+      "name": "./tmp/test-2026-03-25.log.2026",
+      "hash": "5531939b64b7438347680066f6c39552"
+    },
+    {
+      "date": 1774479623139,
+      "name": "./tmp/test-2026-03-26.log.0",
+      "hash": "d0d4c91265784b557311bdf2e1205cde"
+    },
+    {
+      "date": 1774534547831,
+      "name": "./tmp/test-2026-03-26.log.2026",
+      "hash": "d63a097407c9c6f63f66d2b6c4fdd2bf"
+    },
+    {
+      "date": 1774630713576,
+      "name": "./tmp/test-2026-03-27.log.0",
+      "hash": "790ae48f046b73c3d16208971ee8b0e0"
+    },
+    {
+      "date": 1774630875944,
+      "name": "./tmp/test-2026-03-27.log.2026",
+      "hash": "52d622f6e025a5eb970147ece780e0aa"
+    }
+  ]
+}

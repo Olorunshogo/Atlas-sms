@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # 5433 on the host, not 5432. `nx dev atlas-backend` runs against the
+    # developer's own local Postgres on 5432; this container backs
+    # `nx docker atlas-backend`. Mapping both to 5432 makes the two modes
+    # mutually exclusive.
+    ports:
+      - '5433:5432'
+    environment:
+      - POSTGRES_USER=atlas
+      - POSTGRES_PASSWORD=atlas
+      - POSTGRES_DB=atlas
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-app-role.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U atlas -d atlas']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  atlas-backend:
+    build:
+      context: .
+      dockerfile: apps/atlas-backend/Dockerfile
+    ports:
+      - '5754:5754'
+    env_file:
+      - .env
+    # `environment` wins over `env_file`, which is the point: .env holds the
+    # host-side addresses used by `nx dev`, and these override them with the
+    # compose-network ones. Switching between the two modes needs no edit
+    # to .env. Still klassivox_api, never the superuser, or RLS is bypassed.
+    environment:
+      - PORT=5754
+      - DATABASE_URL=postgres://klassivox_api:klassivox_api_dev@postgres:5432/atlas
+      - DATABASE_ADMIN_URL=postgres://atlas:atlas@postgres:5432/atlas
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Optional. Only needed to expose the local backend publicly, e.g. to
+  # receive a provider webhook. Without a token it is skipped entirely
+  # rather than crash-looping, which is why it sits behind a profile.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ['tunnel']
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --protocol http2 run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - atlas-backend
+
+volumes:
+  postgres-data:

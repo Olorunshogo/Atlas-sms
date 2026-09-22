@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+set -e
+
+echo "💅 Fixing lint & formatting staged files..."
+pnpm lint-staged
+
+echo "✅ Pre-commit checks passed."

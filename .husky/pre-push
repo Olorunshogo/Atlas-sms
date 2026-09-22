@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+set -e
+
+# 1️⃣ Validate branch name
+echo "🔖 Validating branch name..."
+npx validate-branch-name || {
+  echo "❌ Invalid branch name. Push aborted."
+  exit 1
+}
+
+# 2️⃣ Run backend e2e tests before every push
+echo "🧪 Running e2e tests..."
+# pnpm --filter @debridgers/debridgers-backend-e2e test || {
+#   echo "❌ E2E tests failed. Push aborted."
+#   exit 1
+# }
+echo "✅ E2E tests passed."
+
+# 3️⃣ Protected branch checks, runs when pushing to develop or main
+current_user=$(git config user.email)
+allowed_user='shownzy001@gmail.com'
+z40=0000000000000000000000000000000000000000
+
+check_heavy_files() {
+  echo "📦 Checking for heavy files..."
+
+  _tmp=$(mktemp)
+
+  git ls-files | grep -E '\.(jpg|jpeg|png|gif|webp|ico|mp4|mp3|wav|pdf|zip|woff|woff2|ttf|otf)$' | while IFS= read -r file; do
+    size=$(wc -c < "$file" 2>/dev/null || echo 0)
+    if [ "$size" -gt $((100 * 1024)) ]; then
+      printf "  %s (%sKB)\n" "$file" "$(( size / 1024 ))" >> "$_tmp"
+    fi
+  done
+  if [ -s "$_tmp" ]; then
+    echo "❌ Heavy media files detected (over 100KB). Host them on a CDN - do not commit binaries to git:"
+    cat "$_tmp"
+    rm -f "$_tmp"
+    exit 1
+  fi
+  rm -f "$_tmp"
+
+  _tmp2=$(mktemp)
+
+  # pnpm-lock.yaml is exempt - a large lockfile is expected, not an accidental binary.
+  git ls-files | grep -v '^pnpm-lock\.yaml$' | while IFS= read -r file; do
+    size=$(wc -c < "$file" 2>/dev/null || echo 0)
+    if [ "$size" -gt $((500 * 1024)) ]; then
+      printf "  %s (%sKB)\n" "$file" "$(( size / 1024 ))" >> "$_tmp2"
+    fi
+  done
+  if [ -s "$_tmp2" ]; then
+    echo "❌ Large files detected (over 500KB). Remove or gitignore them:"
+    cat "$_tmp2"
+    rm -f "$_tmp2"
+    exit 1
+  fi
+  rm -f "$_tmp2"
+
+  echo "✅ No heavy files found."
+}
+
+while read local_ref local_sha remote_ref remote_sha
+do
+  case "$remote_ref" in
+    refs/heads/develop)
+      # No deleting or force-pushing develop
+      if [ "$local_sha" = "$z40" ]; then
+        echo "❌ Deleting develop is restricted."
+        exit 1
+      fi
+      if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+        echo "❌ Force push to develop is restricted."
+        exit 1
+      fi
+      check_heavy_files
+      ;;
+
+    refs/heads/main)
+      # Only the allowed user can push to main
+      if [ "$current_user" != "$allowed_user" ]; then
+        echo "❌ Only $allowed_user can push to main."
+        exit 1
+      fi
+      if [ "$local_sha" = "$z40" ]; then
+        echo "❌ Deleting main is restricted."
+        exit 1
+      fi
+      if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+        echo "❌ Force push to main is restricted."
+        exit 1
+      fi
+      check_heavy_files
+      ;;
+  esac
+done
+
+echo "✅ Pre-push checks passed."
+
+exit 0

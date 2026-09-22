@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.nx
+tmp
+*.log
+.env
+.env.*
+.DS_Store
+build
+storybook-static
+test-output

@@ -1,0 +1,83 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Landing: debug server-side",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm dev:landing",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
+    },
+    {
+      "name": "Landing: debug client-side",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000"
+    },
+    {
+      "name": "Landing: debug full stack",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm dev:landing",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      },
+      "cascadeTerminateToConfigurations": ["Landing: debug client-side"]
+    },
+    {
+      "name": "Web: debug server-side",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm dev:web",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
+    },
+    {
+      "name": "Web: debug client-side",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000"
+    },
+    {
+      "name": "Backend: debug server (Rust, cargo run)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--manifest-path=apps/atlas-backend/Cargo.toml"],
+        "filter": {
+          "name": "atlas-backend",
+          "kind": "bin"
+        }
+      },
+      "cwd": "${workspaceFolder}/apps/atlas-backend",
+      "env": { "RUST_LOG": "debug" }
+    },
+    {
+      "name": "Backend: debug tests (Rust, cargo test)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--manifest-path=apps/atlas-backend/Cargo.toml"
+        ],
+        "filter": {
+          "name": "atlas-backend",
+          "kind": "lib"
+        }
+      },
+      "cwd": "${workspaceFolder}/apps/atlas-backend",
+      "env": { "RUST_LOG": "debug" }
+    }
+  ]
+}

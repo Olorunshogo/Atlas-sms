@@ -1,0 +1,74 @@
+{
+  "name": "atlas-backend",
+  "root": "apps/atlas-backend",
+  "sourceRoot": "apps/atlas-backend/src",
+  "projectType": "application",
+  "tags": ["scope:atlas-backend", "type:app"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/target/release"],
+      "options": {
+        "command": "cargo build --release --manifest-path apps/atlas-backend/Cargo.toml"
+      }
+    },
+    "docker": {
+      "executor": "nx:run-commands",
+      "options": {
+        "parallel": false,
+        "commands": [
+          "nx reset",
+          "docker compose -f docker-compose.atlas.yml up -d postgres",
+          "docker compose -f docker-compose.atlas.yml up --build atlas-backend"
+        ]
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "parallel": false,
+        "commands": [
+          "nx reset",
+          "sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\"",
+          "cargo run --manifest-path apps/atlas-backend/Cargo.toml"
+        ]
+      }
+    },
+    "migrate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\""
+      }
+    },
+    "migrate:revert": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "sqlx migrate revert --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\""
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo run --manifest-path apps/atlas-backend/Cargo.toml"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo test --manifest-path apps/atlas-backend/Cargo.toml"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo clippy --manifest-path apps/atlas-backend/Cargo.toml -- -D warnings"
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cargo fmt --manifest-path apps/atlas-backend/Cargo.toml --check"
+      }
+    }
+  }
+}

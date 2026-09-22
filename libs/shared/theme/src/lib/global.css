@@ -1,0 +1,235 @@
+/**
+ * Font Outfit - loaded here for apps that import global.css directly. Must
+ * come before @import 'tailwindcss' below: Tailwind's import expands into
+ * real CSS content (including @layer rules) at build time, and any @import
+ * after that expansion violates the CSS spec (@import must precede all
+ * rules except @charset/@layer statements).
+ */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+@import 'tailwindcss';
+
+/*
+ * Neutral placeholder tokens (see docs/frontend/design/THEME.md). Klassivox
+ * has not chosen its own visual identity yet - swap the values below in
+ * place when it does, keeping the same token names so components don't
+ * need to change.
+ */
+:root {
+  /* === Surfaces */
+  --surface-canvas: #ffffff;
+  --surface-raised: #fafafa;
+  --surface-sunken: #f4f4f5;
+  --surface-inked: #0a0a0a;
+
+  /* === Ink (text & iconography) */
+  --ink-primary: #0a0a0a;
+  --ink-secondary: #3f3f46;
+  --ink-muted: #71717a;
+  --ink-disabled: #a1a1aa;
+  --ink-inverse: #fafafa;
+
+  /* === Borders */
+  --border-soft: #e4e4e7;
+  --border-firm: #d4d4d8;
+  --border-inked: #0a0a0a;
+
+  /* === Brand accent - neutral placeholder until Klassivox picks a hue */
+  --brand: #18181b;
+  --brand-hover: #27272a;
+  --brand-soft: #f4f4f5;
+  --brand-ink: #18181b;
+
+  /* === Status (functional, not brand-specific) */
+  --success: #16a34a;
+  --success-soft: #f0fdf4;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+
+  /* === Layout */
+  --navbar-h: 5.8rem;
+  --section-px: 1rem;
+  --section-px-sm: 1.5rem;
+  --section-px-lg: 2rem;
+  --section-py: 2rem;
+  --section-py-sm: 2.5rem;
+  --section-py-lg: 6.25rem;
+  --page-margin-x: var(--ion-padding, 3vw);
+  --page-margin-y: var(--ion-padding, 5vmin);
+
+  /* === Semantic spacing scale (base unit 4px) */
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-base: 1.25rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+  --space-3xl: 4rem;
+  --space-4xl: 6rem;
+}
+
+@theme inline {
+  /* === Surfaces */
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-inked: var(--surface-inked);
+
+  /* === Ink */
+  --color-ink-primary: var(--ink-primary);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-disabled: var(--ink-disabled);
+  --color-ink-inverse: var(--ink-inverse);
+
+  /* === Borders */
+  --color-border-soft: var(--border-soft);
+  --color-border-firm: var(--border-firm);
+  --color-border-inked: var(--border-inked);
+
+  /* === Brand */
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+
+  /* === Status */
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* === shadcn-vue primitive tokens (consumed by @atlasui-web) */
+  --color-background: var(--surface-canvas);
+  --color-foreground: var(--ink-primary);
+  --color-primary: var(--ink-primary);
+  --color-primary-foreground: var(--surface-canvas);
+  --color-secondary: var(--surface-sunken);
+  --color-secondary-foreground: var(--ink-primary);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--surface-canvas);
+  --color-muted: var(--surface-sunken);
+  --color-muted-foreground: var(--ink-muted);
+  --color-accent: var(--surface-raised);
+  --color-accent-foreground: var(--ink-primary);
+  --color-popover: var(--surface-canvas);
+  --color-popover-foreground: var(--ink-primary);
+  --color-card: var(--surface-canvas);
+  --color-card-foreground: var(--ink-primary);
+  --color-border: var(--border-soft);
+  --color-input: var(--border-soft);
+  --color-ring: var(--ink-primary);
+
+  /* === Fonts */
+  --font-outfit: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+
+  /* === Layout tokens as spacing utilities */
+  --spacing-navbar-h: var(--navbar-h);
+  --spacing-section-px: var(--section-px);
+  --spacing-section-px-sm: var(--section-px-sm);
+  --spacing-section-px-lg: var(--section-px-lg);
+  --spacing-section-py: var(--section-py);
+  --spacing-section-py-sm: var(--section-py-sm);
+  --spacing-section-py-lg: var(--section-py-lg);
+}
+
+/* === Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-soft);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-muted);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-soft) transparent;
+}
+
+/* === Money figures */
+.tabular-figures {
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Shared layout containers */
+@layer components {
+  .container-max-width {
+    @apply mx-auto w-full max-w-7xl;
+  }
+}
+
+/* === Animations */
+@keyframes loading {
+  0% {
+    transform: scaleX(0);
+  }
+  50% {
+    transform: scaleX(0.5);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  70%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  50% {
+    opacity: 0;
+  }
+}
+
+@layer utilities {
+  .animate-caret-blink {
+    animation: caret-blink 1.2s ease-out infinite;
+  }
+}
+
+/* === Shared modal/dialog engine (KlassivoxDialog) - Ionic host styles for @atlasui-app */
+ion-modal.atlas-dialog {
+  --width: fit-content;
+  --min-width: 250px;
+  --height: fit-content;
+  --max-height: 80vh;
+  --border-radius: 1rem;
+  --max-width: 85vw;
+  --box-shadow: 0 28px 48px rgba(10, 10, 10, 0.4);
+  --backdrop-opacity: 0.6;
+}
+
+ion-accordion.atlas-accordion.accordion-collapsing ion-item[slot='header'],
+ion-accordion.atlas-accordion.accordion-collapsed ion-item[slot='header'] {
+  --background: transparent;
+  --color: var(--ink-primary);
+  --background-hover: transparent;
+  --padding-start: 0.25rem;
+  --padding-end: 0.25rem;
+  --ripple-color: rgba(10, 10, 10, 0.05);
+}
+
+ion-accordion.atlas-accordion.accordion-expanding ion-item[slot='header'],
+ion-accordion.atlas-accordion.accordion-expanded ion-item[slot='header'] {
+  --background: var(--surface-sunken);
+  --color: var(--ink-primary);
+  --background-hover: transparent;
+  --padding-start: 0.25rem;
+  --padding-end: 0.25rem;
+  --ripple-color: rgba(10, 10, 10, 0.05);
+  --border-radius: 2px;
+}

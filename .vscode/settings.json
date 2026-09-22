@@ -1,0 +1,193 @@
+{
+  // === Editor core
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": false,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    "source.organizeImports": "never"
+  },
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  "editor.rulers": [80],
+  "editor.wordWrap": "off",
+  "editor.linkedEditing": true,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.inlayHints.enabled": "on",
+  "editor.suggest.preview": true,
+  "editor.acceptSuggestionOnEnter": "smart",
+  "editor.quickSuggestionsDelay": 100,
+  "editor.stickyScroll.enabled": true,
+
+  // === Files
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 300,
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/cache": true,
+    "**/artifacts": true,
+    "**/out": true,
+    "**/.nx": true,
+    "**/.nuxt": true,
+    "**/.data": true,
+    "**/dist": true,
+    "**/target": true,
+    "**/Cargo.lock": false,
+    "**/.pnpm-store": true,
+    "**/.husky/": true,
+    "**/package-lock.json": true,
+    "**/pnpm-lock.yaml": true,
+    "**/pnpm-workspace.yaml": false,
+    "**/.editorconfig": true,
+    "**/.prettierignore": true,
+    "**/.prettierrc": false,
+    "**/.gitignore": false,
+    "**/.nvmrc": true
+  },
+
+  "files.associations": {
+    ".env.*": "dotenv",
+    ".lintstagedrc": "jsonc",
+    "docker-compose*.yml": "dockercompose"
+  },
+
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/node_modules/**": true,
+    "**/.nx/**": true,
+    "**/.pnpm-store/**": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/target/**": true
+  },
+
+  // === Search
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/cache": true,
+    "**/artifacts": true,
+    "**/out": true,
+    "**/.nx": true,
+    "**/.pnpm-store": true,
+    "**/package-lock.json": true,
+    "**/pnpm-lock.yaml": true,
+    "**/target": true,
+    "**/Cargo.lock": true,
+    "**/.claude": true,
+    "**/.husky": true
+  },
+
+  // === TypeScript
+  "js/ts.tsdk": "node_modules/typescript/lib",
+  "js/ts.enablePromptUseWorkspaceTsdk": true,
+  "js/ts.preferences.importModuleSpecifier": "non-relative",
+  "js/ts.preferences.quoteStyle": "single",
+  "js/ts.updateImportsOnFileMove.enabled": "always",
+  "js/ts.inlayHints.parameterNames.enabled": "literals",
+  "js/ts.inlayHints.variableTypes.enabled": false,
+  "js/ts.inlayHints.functionLikeReturnTypes.enabled": false,
+  "js/ts.autoClosingTags.enabled": false,
+  "auto-close-tag.fullMode": false,
+
+  // === ESLint
+  "eslint.enable": true,
+  "eslint.validate": ["javascript", "typescript", "vue"],
+  "eslint.workingDirectories": [{ "mode": "auto" }],
+  "eslint.run": "onSave",
+
+  // === Prettier
+  "prettier.requireConfig": true,
+  "prettier.useEditorConfig": false,
+  "prettier.printWidth": 80,
+  "prettier.tabWidth": 2,
+  "prettier.useTabs": false,
+  "prettier.singleQuote": false,
+  "prettier.semi": true,
+  "prettier.trailingComma": "es5",
+  "prettier.bracketSpacing": true,
+
+  // === Language formatters
+  "[javascript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[vue]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[jsonc]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[css]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.wordWrap": "on"
+  },
+
+  // === Tailwind CSS
+  "tailwindCSS.experimental.classRegex": [
+    ["cn\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"],
+    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["cx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"]
+  ],
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript"
+  },
+  "tailwindCSS.validate": true,
+
+  // === Rust (atlas-backend)
+  "[rust]": { "editor.defaultFormatter": "rust-lang.rust-analyzer" },
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.linkedProjects": ["./Cargo.toml"],
+
+  // === Terminal
+  "terminal.integrated.defaultProfile.linux": "bash",
+  // === Fix NX extension "pnpm: not found" — pnpm lives outside the shell PATH
+  "terminal.integrated.env.linux": {
+    "PATH": "/home/olorunshogo/.local/share/pnpm:${env:PATH}"
+  },
+
+  // === Git
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "git.enableSmartCommit": true,
+
+  // === Nx
+  "nxConsole.packageManager": "pnpm",
+
+  // === Misc
+  "emmet.includeLanguages": {
+    "vue": "html"
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "*.ts": "${capture}.js, ${capture}.d.ts",
+    "*.vue": "${capture}.module.css, ${capture}.stories.ts",
+    "package.json": "Cargo.toml, pnpm-workspace.yaml, .npmrc, .nvmrc, .node-version, pnpm-lock.yaml, package-lock.json, Cargo.lock",
+    "vite.config.*": "vite-env.d.ts",
+    "tailwind.config.*": "postcss.config.*",
+    "docker-compose.yml": "docker-compose.*.yml, Dockerfile*, .dockerignore",
+    ".gitignore": "tsconfig.base.json, tsconfig.json, nx.json, .mcp.json, audit.json",
+    "eslint.config.*": ".prettierrc, .prettierignore, .editorconfig, .lintstagedrc*",
+    "README.md": "CLAUDE.md, CONTRIBUTING.md, LICENSE"
+  },
+  "cSpell.words": [
+    "atlas",
+    "nx",
+    "pnpm",
+    "tenancy",
+    "multitenant",
+    "rbac",
+    "axum",
+    "sqlx",
+    "tokio",
+    "serde",
+    "apalis",
+    "cargo",
+    "rustfmt",
+    "clippy"
+  ]
+}

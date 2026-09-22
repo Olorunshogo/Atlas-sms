@@ -1,0 +1,46 @@
+{
+  "recommendations": [
+    // === Core formatting and linting
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+
+    // === TypeScript and Vue/Nuxt
+    "ms-vscode.vscode-typescript-next",
+    "Vue.volar",
+
+    // === Tailwind CSS
+    "bradlc.vscode-tailwindcss",
+
+    // === Nx monorepo
+    "nrwl.angular-console",
+
+    // === Rust backend (atlas-backend)
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "vadimcn.vscode-lldb",
+    "serayuzgur.crates",
+
+    // === Backend infra
+    "docker.docker",
+
+    // === Git
+    "eamodio.gitlens",
+    "mhutchie.git-graph",
+
+    // === DX utilities
+    "christian-kohler.path-intellisense",
+    "streetsidesoftware.code-spell-checker",
+    "usernamehw.errorlens",
+    "antfu.iconify",
+    "mikestead.dotenv",
+
+    // === Editor polish
+    "pkief.material-icon-theme",
+    "naumovs.color-highlight"
+  ],
+  "unwantedRecommendations": [
+    "hookyqr.beautify",
+    "ms-vscode.vscode-typescript-tslint-plugin",
+    "octref.vetur"
+  ]
+}

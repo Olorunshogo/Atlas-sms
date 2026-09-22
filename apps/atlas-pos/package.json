@@ -1,0 +1,37 @@
+{
+  "name": "atlas-pos",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@atlas/ui-app": "workspace:*",
+    "@capacitor/core": "^7.0.0",
+    "@ionic/vue": "^8.4.0",
+    "@ionic/vue-router": "^8.4.0",
+    "@atlas/theme": "workspace:*",
+    "@vee-validate/zod": "catalog:",
+    "vee-validate": "catalog:",
+    "vue": "^3.5.38",
+    "vue-router": "^4.6.4",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@tailwindcss/vite": "^4.3.1",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "eslint-config-prettier": "^10.1.8",
+    "tailwindcss": "^4.3.1",
+    "typescript": "~5.9.2",
+    "vite": "^7.0.0",
+    "vue-tsc": "3.3.6"
+  },
+  "nx": {
+    "tags": ["type:app", "scope:atlas-pos"]
+  }
+}

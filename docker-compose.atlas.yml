@@ -1,0 +1,52 @@
+#
+# Atlas's own compose stack, deliberately separate from docker-compose.yml
+# (Klassivox's). Not two services on one shared Postgres - a fully separate
+# server/container/volume, so a Postgres-level incident on one product has
+# no path to the other's data, on top of the atlas/public schema split
+# inside each database.
+#
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # 5434 on the host: distinct from Klassivox's 5433 and from a
+    # developer's own local Postgres on 5432, so all three can run at once.
+    ports:
+      - '5434:5432'
+    environment:
+      - POSTGRES_USER=atlas
+      - POSTGRES_PASSWORD=atlas
+      - POSTGRES_DB=atlas
+    volumes:
+      - atlas-postgres-data:/var/lib/postgresql/data
+      - ./docker/atlas-postgres-init.sql:/docker-entrypoint-initdb.d/00-app-role.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U atlas -d atlas']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  atlas-backend:
+    build:
+      context: .
+      dockerfile: apps/atlas-backend/Dockerfile
+    ports:
+      - '5755:5755'
+    env_file:
+      - .env
+    # `environment` wins over `env_file`: .env holds the host-side address
+    # used by `nx dev`, this overrides it with the compose-network one.
+    # Still atlas_api, never the superuser, or RLS is bypassed.
+    environment:
+      - ATLAS_PORT=5755
+      - ATLAS_DATABASE_URL=postgres://atlas_api:atlas_api_dev@postgres:5432/atlas
+      - ATLAS_DATABASE_ADMIN_URL=postgres://atlas:atlas@postgres:5432/atlas
+      # Dev-only placeholder - staging/production set a real secret through
+      # the provider's env config, never committed.
+      - ATLAS_JWT_SECRET=atlas_dev_jwt_secret_change_me
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  atlas-postgres-data:

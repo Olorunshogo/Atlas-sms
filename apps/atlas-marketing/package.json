@@ -1,0 +1,38 @@
+{
+  "name": "atlas-marketing",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@atlas/ui-core": "workspace:*",
+    "@atlas/ui-web": "workspace:*",
+    "@atlas/composables": "workspace:*",
+    "@atlas/theme": "workspace:*",
+    "@pinia/nuxt": "^0.11.3",
+    "@vee-validate/zod": "catalog:",
+    "nuxt": "^4.4.8",
+    "pinia": "^3.0.4",
+    "vee-validate": "catalog:",
+    "vue": "^3.5.38",
+    "vue-router": "^4.6.4",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "^1.16.0",
+    "@tailwindcss/vite": "^4.3.1",
+    "eslint-config-prettier": "^10.1.8",
+    "tailwindcss": "^4.3.1",
+    "typescript": "~5.9.2"
+  },
+  "nx": {
+    "tags": ["type:app", "scope:atlas-marketing"]
+  }
+}
