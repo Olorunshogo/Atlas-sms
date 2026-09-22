@@ -8,8 +8,8 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/on-hand", get(handlers::on_hand))
-        .route("/adjustments", post(handlers::adjust))
-        .route("/transfers", post(handlers::transfer))
+    return Router::new()
+        .route("/on-hand", get(handlers::get_stock_on_hand))
+        .route("/adjustments", post(handlers::adjust_stock))
+        .route("/transfers", post(handlers::transfer_stock));
 }

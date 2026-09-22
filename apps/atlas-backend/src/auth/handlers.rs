@@ -3,6 +3,7 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{Duration, Utc};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::crypto;
@@ -14,23 +15,21 @@ use crate::state::AppState;
 use super::cookies::{self, client_type, ClientType};
 use super::models::{
     AcceptInviteRequest, AuthenticatedUser, ForgotPasswordRequest, LoginRequest, RefreshRequest, ResetPasswordRequest,
-    SessionData, SignupRequest, SignupResponseData, VerifyEmailRequest,
+    SessionData, SignupRequest, SignupResponseData, SwitchTenantRequest, VerifyEmailRequest,
 };
 use super::{jwt, otp, password};
 
-/// Fixed id of the seeded `owner` system role (`atlas.roles`, migration
-/// `20260922000009_seed_system_roles.sql`) - signup always grants this one.
+/// Fixed id of the seeded `owner` system role (`atlas.roles`, migration `20260922000009_seed_system_roles.sql`) - signup always grants this one.
 fn owner_role_id() -> Uuid {
-    Uuid::parse_str("00000000-0000-7000-8000-000000000001").expect("valid constant uuid")
+    return Uuid::parse_str("00000000-0000-7000-8000-000000000001").expect("valid constant uuid");
 }
 
 // === Signup
 
 /**
- * `POST /api/v1/auth/signup`. Creates the user and a brand-new tenant in
- * one transaction, grants the caller `owner` on it (pending until email
- * verification), and emails a 6-digit OTP. Runs entirely inside an
- * `AdminTx`: no tenant exists yet for a `TenantTx` to scope to.
+ * `POST /api/v1/auth/signup`.
+ * Creates the user and a brand-new tenant in one transaction, grants the caller `owner` on it (pending until email verification), and emails a 6-digit OTP.
+ * Runs entirely inside an `AdminTx`: no tenant exists yet for a `TenantTx` to scope to.
  */
 pub async fn signup(
     State(state): State<AppState>,
@@ -103,13 +102,13 @@ pub async fn signup(
 
     let data = SignupResponseData { email: payload.email };
 
-    Ok((
+    return Ok((
         StatusCode::CREATED,
         Json(ApiEnvelope::ok(
             "Registration successful! Please check your email for the verification code.",
             data,
         )),
-    ))
+    ));
 }
 
 fn validate_signup(payload: &SignupRequest) -> Result<(), ApiError> {
@@ -128,11 +127,10 @@ fn validate_signup(payload: &SignupRequest) -> Result<(), ApiError> {
     if payload.tenant_name.trim().is_empty() {
         return Err(ApiError::bad_request("tenant_name is required"));
     }
-    Ok(())
+    return Ok(());
 }
 
-/// Shared by signup and forgot-password - generates, hashes, stores and
-/// emails a 6-digit OTP under the given `purpose`.
+/// Shared by signup and forgot-password - generates, hashes, stores and emails a 6-digit OTP under the given `purpose`.
 async fn send_otp(
     tx: &mut AdminTx,
     state: &AppState,
@@ -157,21 +155,21 @@ async fn send_otp(
     .execute(&mut **tx)
     .await?;
 
-    state
+    return state
         .email
-        .send(email, subject, &format!("Your verification code is {code}. It expires in 10 minutes."))
+        .send(email, subject, &format!("Your verification code is {}. It expires in 10 minutes.", code))
         .await
-        .map_err(|err| ApiError::Internal(err.to_string()))
+        .map_err(|err| ApiError::Internal(err.to_string()));
 }
 
 // === Verify email
 
 /**
- * `POST /api/v1/auth/verify-email`. Consumes the OTP, marks the user
- * verified, and activates every `pending` role grant they hold (in
- * practice, exactly the one signup created).
+ * `POST /api/v1/auth/verify-email`.
+ * Consumes the OTP, marks the user verified, and activates every `pending` role grant they hold (in practice, exactly the one signup created).
  */
 pub async fn verify_email(
+    State(state): State<AppState>,
     mut tx: AdminTx,
     Json(payload): Json<VerifyEmailRequest>,
 ) -> Result<Json<ApiEnvelope<()>>, ApiError> {
@@ -181,7 +179,7 @@ pub async fn verify_email(
         .await?
         .ok_or_else(|| ApiError::bad_request("Invalid email or code."))?;
 
-    consume_otp(&mut tx, user_id, "signup_verification", &payload.code).await?;
+    consume_otp(&mut tx, &state.pool, user_id, "signup_verification", &payload.code).await?;
 
     sqlx::query("UPDATE atlas.users SET is_email_verified = true, updated_at = now() WHERE id = $1")
         .bind(user_id)
@@ -198,17 +196,25 @@ pub async fn verify_email(
 
     tx.commit().await?;
 
-    Ok(Json(ApiEnvelope::ok("Email verified successfully.", ())))
+    return Ok(Json(ApiEnvelope::ok("Email verified successfully.", ())));
 }
 
-/// Shared by verify-email and reset-password: looks up the most recent
-/// unconsumed, unexpired OTP for `purpose`, checks it against `code`, and
-/// marks it consumed. Returns the OTP's own id (unused by most callers,
-/// but kept so a future audit trail can reference exactly which code was
-/// spent).
-async fn consume_otp(tx: &mut AdminTx, user_id: Uuid, purpose: &str, code: &str) -> Result<Uuid, ApiError> {
-    let otp_row: Option<(Uuid, String)> = sqlx::query_as(
-        "SELECT id, code_hash FROM atlas.email_otps
+/// A code is dead after this many wrong guesses, independent of IP-based rate limiting - a 6-digit code is only ~1,000,000 possibilities, small enough that an attacker who rotates IPs would otherwise get unlimited tries against a fixed target email.
+const MAX_OTP_ATTEMPTS: i32 = 5;
+
+/**
+ * Shared by verify-email and reset-password: looks up the most recent unconsumed, unexpired OTP for `purpose`, checks it against `code`, and marks it consumed.
+ * Returns the OTP's own id (unused by most callers, but kept so a future audit trail can reference exactly which code was spent).
+ */
+async fn consume_otp(
+    tx: &mut AdminTx,
+    pool: &PgPool,
+    user_id: Uuid,
+    purpose: &str,
+    code: &str,
+) -> Result<Uuid, ApiError> {
+    let otp_row: Option<(Uuid, String, i32)> = sqlx::query_as(
+        "SELECT id, code_hash, attempts FROM atlas.email_otps
          WHERE user_id = $1 AND purpose = $2
            AND consumed_at IS NULL AND expires_at > now()
          ORDER BY created_at DESC
@@ -219,9 +225,24 @@ async fn consume_otp(tx: &mut AdminTx, user_id: Uuid, purpose: &str, code: &str)
     .fetch_optional(&mut **tx)
     .await?;
 
-    let (otp_id, code_hash) = otp_row.ok_or_else(|| ApiError::bad_request("Invalid or expired code."))?;
+    let (otp_id, code_hash, attempts) =
+        otp_row.ok_or_else(|| ApiError::bad_request("Invalid or expired code."))?;
+
+    if attempts >= MAX_OTP_ATTEMPTS {
+        return Err(ApiError::bad_request("Invalid or expired code."));
+    }
 
     if !otp::verify_code(code, &code_hash)? {
+        // Committed against `pool` directly, NOT `tx`: the caller's own
+        // transaction rolls back on this error (nothing else it did should
+        // persist), but a wrong guess must still count against the attempt
+        // budget even though the request as a whole fails - running this
+        // on `tx` would have made the increment disappear on every single
+        // wrong guess, defeating the lockout entirely.
+        sqlx::query("UPDATE atlas.email_otps SET attempts = attempts + 1 WHERE id = $1")
+            .bind(otp_id)
+            .execute(pool)
+            .await?;
         return Err(ApiError::bad_request("Invalid or expired code."));
     }
 
@@ -230,17 +251,14 @@ async fn consume_otp(tx: &mut AdminTx, user_id: Uuid, purpose: &str, code: &str)
         .execute(&mut **tx)
         .await?;
 
-    Ok(otp_id)
+    return Ok(otp_id);
 }
 
 // === Login
 
 /**
- * `POST /api/v1/auth/login`. Verifies the password, resolves which tenant
- * to authenticate into (the sole one if the user has only one active
- * grant, otherwise the caller must name `tenant_id`), and issues an access
- * JWT plus an opaque refresh token - delivered per `X-Client-Type`, see
- * `cookies::client_type`'s doc comment.
+ * `POST /api/v1/auth/login`.
+ * Verifies the password, resolves which tenant to authenticate into (the sole one if the user has only one active grant, otherwise the caller must name `tenant_id`), and issues an access JWT plus an opaque refresh token - delivered per `X-Client-Type`, see `cookies::client_type`'s doc comment.
  */
 pub async fn login(
     State(state): State<AppState>,
@@ -297,11 +315,10 @@ pub async fn login(
     tx.commit().await?;
 
     let user = AuthenticatedUser { id: user_id, full_name, email };
-    Ok(session_response(client_type(&headers), "Logged in.", access_token, refresh_token, tenant_id, user))
+    return Ok(session_response(client_type(&headers), "Logged in.", access_token, refresh_token, tenant_id, user));
 }
 
-/// Issues a fresh access JWT and a fresh (stored, hashed) opaque refresh
-/// token - the one write path both `login` and `refresh` share.
+/// Issues a fresh access JWT and a fresh (stored, hashed) opaque refresh token - the one write path both `login` and `refresh` share.
 async fn issue_session(
     tx: &mut AdminTx,
     user_id: Uuid,
@@ -325,14 +342,12 @@ async fn issue_session(
     .execute(&mut **tx)
     .await?;
 
-    Ok((access_token, refresh_token))
+    return Ok((access_token, refresh_token));
 }
 
 /**
- * Builds the login/refresh response per `X-Client-Type`: `Web` gets
- * `Set-Cookie` headers and no tokens in the JSON body, `App` gets the
- * tokens in the body and no cookies. See `SessionData`'s doc comment for
- * why this distinction is load-bearing, not cosmetic.
+ * Builds the login/refresh response per `X-Client-Type`: `Web` gets `Set-Cookie` headers and no tokens in the JSON body, `App` gets the tokens in the body and no cookies.
+ * See `SessionData`'s doc comment for why this distinction is load-bearing, not cosmetic.
  */
 fn session_response(
     client: ClientType,
@@ -365,21 +380,16 @@ fn session_response(
         );
     }
 
-    response
+    return response;
 }
 
 // === Refresh
 
 /**
- * `POST /api/v1/auth/refresh`. Looks the refresh token up by its SHA-256
- * lookup hash (see `crypto::hash_lookup_token`), issues a fresh access
- * token for the same tenant, and rotates the refresh token itself
- * (revokes the old row, inserts a new one) so a leaked refresh token used
- * once by an attacker and once by the real client is detectable later
- * (both would present the same now-revoked token).
+ * `POST /api/v1/auth/refresh`.
+ * Looks the refresh token up by its SHA-256 lookup hash (see `crypto::hash_lookup_token`), issues a fresh access token for the same tenant, and rotates the refresh token itself (revokes the old row, inserts a new one) so a leaked refresh token used once by an attacker and once by the real client is detectable later (both would present the same now-revoked token).
  *
- * For `Web`, the incoming refresh token is read from the cookie the proxy
- * forwards, not the body - `RefreshRequest.refresh_token` is `App`'s path.
+ * For `Web`, the incoming refresh token is read from the cookie the proxy forwards, not the body - `RefreshRequest.refresh_token` is `App`'s path.
  */
 pub async fn refresh(
     State(state): State<AppState>,
@@ -422,28 +432,23 @@ pub async fn refresh(
     tx.commit().await?;
 
     let authenticated_user = AuthenticatedUser { id: user_id, full_name: user.0, email: user.1 };
-    Ok(session_response(client, "Token refreshed.", access_token, refresh_token, tenant_id, authenticated_user))
+    return Ok(session_response(client, "Token refreshed.", access_token, refresh_token, tenant_id, authenticated_user));
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
-    cookie_header.split(';').map(str::trim).find_map(|pair| {
+    return cookie_header.split(';').map(str::trim).find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
         (key == name).then(|| value.to_string())
-    })
+    });
 }
 
 // === Accept invite
 
 /**
- * `POST /api/v1/auth/invites/:token/accept`. Looks the invite up by its
- * lookup hash, creates the user if none exists yet for its email (pre-
- * verified - receiving the link already proved control of the email, no
- * separate OTP step), grants the invited role, and marks the invite
- * accepted. Routes to login next, same as signup - never auto-logs-in, per
- * `docs/backend/auth.md`'s reasoning (Klassivox's, reused here): the
- * user's first real action should be proving they can log in with what
- * they just set.
+ * `POST /api/v1/auth/invites/:token/accept`.
+ * Looks the invite up by its lookup hash, creates the user if none exists yet for its email (pre-verified - receiving the link already proved control of the email, no separate OTP step), grants the invited role, and marks the invite accepted.
+ * Routes to login next, same as signup - never auto-logs-in, per `docs/backend/auth.md`'s reasoning (Klassivox's, reused here): the user's first real action should be proving they can log in with what they just set.
  */
 pub async fn accept_invite(
     Path(token): Path<String>,
@@ -517,15 +522,14 @@ pub async fn accept_invite(
 
     tx.commit().await?;
 
-    Ok(Json(ApiEnvelope::ok("Invite accepted. Please log in.", ())))
+    return Ok(Json(ApiEnvelope::ok("Invite accepted. Please log in.", ())));
 }
 
 // === Forgot / reset password
 
 /**
- * `POST /api/v1/auth/forgot-password`. Always the same response whether or
- * not the email exists - an existence-dependent response is an account
- * enumeration oracle.
+ * `POST /api/v1/auth/forgot-password`.
+ * Always the same response whether or not the email exists - an existence-dependent response is an account enumeration oracle.
  */
 pub async fn forgot_password(
     State(state): State<AppState>,
@@ -544,16 +548,19 @@ pub async fn forgot_password(
 
     tx.commit().await?;
 
-    Ok(Json(ApiEnvelope::ok(
+    return Ok(Json(ApiEnvelope::ok(
         "If that email has an account, a reset code has been sent.",
         (),
-    )))
+    )));
 }
 
-/// `POST /api/v1/auth/reset-password`. Consumes the OTP, updates the
-/// password. Does not log the user in - same "prove you can use it" reasoning
-/// as signup and accept-invite.
+/**
+ * `POST /api/v1/auth/reset-password`.
+ * Consumes the OTP, updates the password.
+ * Does not log the user in - same "prove you can use it" reasoning as signup and accept-invite.
+ */
 pub async fn reset_password(
+    State(state): State<AppState>,
     mut tx: AdminTx,
     Json(payload): Json<ResetPasswordRequest>,
 ) -> Result<Json<ApiEnvelope<()>>, ApiError> {
@@ -563,7 +570,7 @@ pub async fn reset_password(
         .await?
         .ok_or_else(|| ApiError::bad_request("Invalid email or code."))?;
 
-    consume_otp(&mut tx, user_id, "password_reset", &payload.code).await?;
+    consume_otp(&mut tx, &state.pool, user_id, "password_reset", &payload.code).await?;
 
     if payload.new_password.len() < 8 {
         return Err(ApiError::bad_request("password must be at least 8 characters"));
@@ -587,5 +594,118 @@ pub async fn reset_password(
 
     tx.commit().await?;
 
-    Ok(Json(ApiEnvelope::ok("Password reset. Please log in.", ())))
+    return Ok(Json(ApiEnvelope::ok("Password reset. Please log in.", ())));
+}
+
+// === Logout
+
+/**
+ * `POST /api/v1/auth/logout`.
+ * Revokes just the presented refresh token, not every session the caller holds - logging out of one device/tenant shouldn't silently sign them out elsewhere.
+ * Idempotent: an unknown or already-revoked token still returns success, both to avoid an enumeration oracle and because "log out" should feel like it worked even on a double-click or an already-expired session.
+ */
+pub async fn logout(
+    headers: HeaderMap,
+    mut tx: AdminTx,
+    Json(payload): Json<RefreshRequest>,
+) -> Result<Response, ApiError> {
+    let client = client_type(&headers);
+
+    let presented_token = match client {
+        ClientType::App => Some(payload.refresh_token),
+        ClientType::Web => cookie_value(&headers, cookies::REFRESH_TOKEN_COOKIE),
+    };
+
+    if let Some(token) = presented_token {
+        let lookup_hash = crypto::hash_lookup_token(&token);
+        sqlx::query(
+            "UPDATE atlas.refresh_tokens SET revoked_at = now()
+             WHERE token_hash = $1 AND revoked_at IS NULL",
+        )
+        .bind(&lookup_hash)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    let mut response = Json(ApiEnvelope::ok("Logged out.", ())).into_response();
+
+    if client == ClientType::Web {
+        let response_headers = response.headers_mut();
+        response_headers.append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&cookies::clear_cookie(cookies::ACCESS_TOKEN_COOKIE))
+                .expect("cookie value is always valid ascii"),
+        );
+        response_headers.append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&cookies::clear_cookie(cookies::REFRESH_TOKEN_COOKIE))
+                .expect("cookie value is always valid ascii"),
+        );
+    }
+
+    return Ok(response);
+}
+
+// === Switch tenant
+
+/**
+ * `POST /api/v1/auth/switch-tenant`.
+ * For a user holding active grants in more than one tenant: re-issues a session for a different one of their tenants without a full re-login.
+ * Proves identity via the current access token rather than a fresh password, then checks the target tenant is one the caller actually holds an active grant in - the same containment posture as `roles::service`, just checked here directly since there's no tenant-scoped `TenantTx` yet at this point (that's the reason this endpoint exists at all).
+ *
+ * Deliberately does not revoke the previous tenant's refresh token - nothing about switching implies logging out of the tenant switched away from; a user can hold sessions in two tenants at once.
+ */
+pub async fn switch_tenant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut tx: AdminTx,
+    Json(payload): Json<SwitchTenantRequest>,
+) -> Result<Response, ApiError> {
+    let claims = jwt::decode_access_token(&bearer_token(&headers)?, &state.jwt_secret)?;
+
+    let has_grant: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM atlas.role_grants
+         WHERE user_id = $1 AND tenant_id = $2 AND status = 'active'
+         LIMIT 1",
+    )
+    .bind(claims.sub)
+    .bind(payload.tenant_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    has_grant.ok_or_else(|| ApiError::forbidden("You have no active role in that tenant."))?;
+
+    let user: (String, String) =
+        sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1")
+            .bind(claims.sub)
+            .fetch_one(&mut *tx)
+            .await?;
+
+    let (access_token, refresh_token) = issue_session(&mut tx, claims.sub, payload.tenant_id, &state).await?;
+    tx.commit().await?;
+
+    let authenticated_user = AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1 };
+    return Ok(session_response(
+        client_type(&headers),
+        "Switched tenant.",
+        access_token,
+        refresh_token,
+        payload.tenant_id,
+        authenticated_user,
+    ));
+}
+
+fn bearer_token(headers: &HeaderMap) -> Result<String, ApiError> {
+    let header = headers
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| ApiError::Unauthorized("missing Authorization header".to_string()))?
+        .to_str()
+        .map_err(|_| ApiError::Unauthorized("invalid Authorization header".to_string()))?;
+
+    return header
+        .strip_prefix("Bearer ")
+        .map(str::to_string)
+        .ok_or_else(|| ApiError::Unauthorized("expected a Bearer token".to_string()));
 }

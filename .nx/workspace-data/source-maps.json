@@ -1,0 +1,1510 @@
+{
+  "apps/atlas-marketing": {
+    "root": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.dependsOn": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.cache": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.inputs": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.outputs": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.syncGenerators": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.executor": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.cwd": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.command": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies.0": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.description": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.command": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.example": [
+      "apps/atlas-marketing/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "name": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "tags": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.npm:private": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.type:app": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.scope:atlas-marketing": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.0": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.1": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.2": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.3": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.4": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.5": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageName": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.isInPackageManagerWorkspaces": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.executor": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.options": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.metadata": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.options.script": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.metadata.scriptContent": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.metadata.runCommand": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.executor": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.options": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.metadata": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.options.script": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.metadata.scriptContent": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.metadata.runCommand": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate.executor": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate.options": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate.metadata": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate.options.script": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate.metadata.scriptContent": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.generate.metadata.runCommand": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.executor": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.options": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.metadata": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.options.script": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.metadata.scriptContent": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.metadata.runCommand": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall.executor": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall.options": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall.metadata": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall.options.script": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall.metadata.scriptContent": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.postinstall.metadata.runCommand": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.executor": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.options": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.metadata": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.options.script": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.metadata.scriptContent": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.metadata.runCommand": [
+      "apps/atlas-marketing/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.dependsOn": [
+      "nx.json",
+      "nx/target-defaults"
+    ],
+    "targets.build.parallelism": [
+      "nx.json",
+      "nx/target-defaults"
+    ]
+  },
+  "apps/atlas-pos": {
+    "root": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.dependsOn": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.cache": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.inputs": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.outputs": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.syncGenerators": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.executor": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.cwd": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.command": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies.0": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.description": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.command": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.example": [
+      "apps/atlas-pos/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "projectType": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vitest"
+    ],
+    "targets.serve": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.continuous": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.options": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.syncGenerators": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.executor": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.options.cwd": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.options.command": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.technologies": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.technologies.0": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.description": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.help": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.help.command": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.help.example": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve.metadata.deprecated": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static.continuous": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static.executor": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static.options": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static.syncGenerators": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static.options.buildTarget": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.serve-static.options.spa": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.cache": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.inputs": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.options": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.dependsOn": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.syncGenerators": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.executor": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.options.cwd": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.options.command": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.description": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.technologies": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.technologies.0": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.technologies.1": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.help": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.help.command": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:typecheck.metadata.help.example": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:build-deps": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:build-deps.dependsOn": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:watch-deps": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:watch-deps.continuous": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:watch-deps.dependsOn": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:watch-deps.executor": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:watch-deps.options": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "targets.vite:watch-deps.options.command": [
+      "apps/atlas-pos/vite.config.ts",
+      "@nx/vite/plugin"
+    ],
+    "name": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "tags": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.npm:private": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.type:app": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.scope:atlas-pos": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.0": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.1": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.2": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups.NPM Scripts.3": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageName": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.isInPackageManagerWorkspaces": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.executor": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.options": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.metadata": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.options.script": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.metadata.scriptContent": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.dev.metadata.runCommand": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.executor": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.options": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.metadata": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.options.script": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.metadata.scriptContent": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.metadata.runCommand": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.executor": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.options": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.metadata": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.options.script": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.metadata.scriptContent": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.preview.metadata.runCommand": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.executor": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.options": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.metadata": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.options.script": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.metadata.scriptContent": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.lint.metadata.runCommand": [
+      "apps/atlas-pos/package.json",
+      "nx/core/package-json"
+    ],
+    "targets.build.dependsOn": [
+      "nx.json",
+      "nx/target-defaults"
+    ],
+    "targets.build.parallelism": [
+      "nx.json",
+      "nx/target-defaults"
+    ]
+  },
+  "libs/shared/composables": {
+    "root": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "targets": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.dependsOn": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.cache": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.inputs": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.outputs": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.syncGenerators": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.executor": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.cwd": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.command": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies.0": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.description": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.command": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.example": [
+      "libs/shared/composables/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.lint": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.cache": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.inputs": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.outputs": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.executor": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options.cwd": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options.command": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.technologies": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.technologies.0": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.description": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help.command": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help.example": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "name": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "tags": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.npm:private": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.type:util": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageName": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageVersion": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageMain": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.isInPackageManagerWorkspaces": [
+      "libs/shared/composables/package.json",
+      "nx/core/package-json"
+    ]
+  },
+  "libs/shared/validation": {
+    "root": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "targets": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.dependsOn": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.cache": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.inputs": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.outputs": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.syncGenerators": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.executor": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.cwd": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.command": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies.0": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.description": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.command": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.example": [
+      "libs/shared/validation/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.lint": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.cache": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.inputs": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.outputs": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.executor": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options.cwd": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options.command": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.technologies": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.technologies.0": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.description": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help.command": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help.example": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "name": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "tags": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.npm:private": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.type:util": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageName": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageVersion": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageMain": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.isInPackageManagerWorkspaces": [
+      "libs/shared/validation/package.json",
+      "nx/core/package-json"
+    ]
+  },
+  "libs/shared/theme": {
+    "root": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "targets": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.cache": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.inputs": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.outputs": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.executor": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options.cwd": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.options.command": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.technologies": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.technologies.0": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.description": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help.command": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.lint.metadata.help.example": [
+      "eslint.config.mjs",
+      "@nx/eslint/plugin"
+    ],
+    "targets.typecheck": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.dependsOn": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.cache": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.inputs": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.outputs": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.syncGenerators": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.executor": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.cwd": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.options.command": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.technologies.0": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.description": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.command": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "targets.typecheck.metadata.help.example": [
+      "libs/shared/theme/tsconfig.json",
+      "@nx/js/typescript"
+    ],
+    "name": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "tags": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.npm:private": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "tags.type:theme": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.targetGroups": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageName": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageVersion": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageExports": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.packageMain": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ],
+    "metadata.js.isInPackageManagerWorkspaces": [
+      "libs/shared/theme/package.json",
+      "nx/core/package-json"
+    ]
+  },
+  "apps/atlas-backend": {
+    "root": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "name": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "sourceRoot": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "projectType": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "tags": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "tags.scope:atlas-backend": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "tags.type:app": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.build": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.build.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.build.outputs": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.build.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.build.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.docker": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.docker.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.docker.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.docker.options.parallel": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.docker.options.commands": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.dev": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.dev.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.dev.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.dev.options.parallel": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.dev.options.commands": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate:revert": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate:revert.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate:revert.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.migrate:revert.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.serve": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.serve.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.serve.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.serve.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.test": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.test.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.test.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.test.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.lint": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.lint.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.lint.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.lint.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.format": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.format.executor": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.format.options": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.format.options.command": [
+      "apps/atlas-backend/project.json",
+      "nx/core/project-json"
+    ],
+    "targets.build.dependsOn": [
+      "nx.json",
+      "nx/target-defaults"
+    ],
+    "targets.build.parallelism": [
+      "nx.json",
+      "nx/target-defaults"
+    ],
+    "targets.test.dependsOn": [
+      "nx.json",
+      "nx/target-defaults"
+    ],
+    "targets.test.parallelism": [
+      "nx.json",
+      "nx/target-defaults"
+    ]
+  }
+}

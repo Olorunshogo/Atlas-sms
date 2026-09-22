@@ -8,15 +8,15 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn product_types_router() -> Router<AppState> {
-    Router::new().route(
+    return Router::new().route(
         "/",
         get(handlers::list_product_types).post(handlers::create_product_type),
-    )
+    );
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route(
+    return Router::new().route(
         "/",
         get(handlers::list_products).post(handlers::create_product),
-    )
+    );
 }

@@ -3,6 +3,7 @@ use axum::Json;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
@@ -13,8 +14,10 @@ use super::models::{
 };
 use super::service;
 
-/// `POST /api/v1/shifts`. Requires `sale.create` at the store - operating
-/// a till starts with opening its shift.
+/**
+ * `POST /api/v1/shifts`.
+ * Requires `sale.create` at the store - operating a till starts with opening its shift.
+ */
 pub async fn open_shift(
     mut tx: TenantTx,
     Json(body): Json<OpenShiftRequest>,
@@ -30,8 +33,18 @@ pub async fn open_shift(
     )
     .await?;
     let shift = service::open_shift(&mut tx, tenant_id, user_id, &body).await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        user_id,
+        "shift",
+        shift.id,
+        "shift.open",
+        serde_json::to_value(&shift).ok(),
+    )
+    .await?;
     tx.commit().await?;
-    Ok(Json(ApiEnvelope::ok("Shift opened.", shift)))
+    return Ok(Json(ApiEnvelope::ok("Shift opened.", shift)));
 }
 
 /// `POST /api/v1/shifts/:id/close`.
@@ -40,10 +53,21 @@ pub async fn close_shift(
     mut tx: TenantTx,
     Json(body): Json<CloseShiftRequest>,
 ) -> Result<Json<ApiEnvelope<Shift>>, ApiError> {
+    let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
     let shift = service::close_shift(&mut tx, shift_id, user_id, &body).await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        user_id,
+        "shift",
+        shift.id,
+        "shift.close",
+        serde_json::to_value(&shift).ok(),
+    )
+    .await?;
     tx.commit().await?;
-    Ok(Json(ApiEnvelope::ok("Shift closed.", shift)))
+    return Ok(Json(ApiEnvelope::ok("Shift closed.", shift)));
 }
 
 #[derive(Deserialize)]
@@ -52,19 +76,21 @@ pub struct ListSalesQuery {
 }
 
 /// `GET /api/v1/sales?shift_id=`.
-pub async fn list(
+pub async fn list_sales(
     mut tx: TenantTx,
     Query(query): Query<ListSalesQuery>,
 ) -> Result<Json<ApiEnvelope<Vec<Sale>>>, ApiError> {
     let sales = service::list_sales_for_shift(&mut tx, query.shift_id).await?;
     tx.commit().await?;
-    Ok(Json(ApiEnvelope::ok("Sales fetched.", sales)))
+    return Ok(Json(ApiEnvelope::ok("Sales fetched.", sales)));
 }
 
-/// `POST /api/v1/sales`. Requires `sale.create` at the store. Idempotent by
-/// `body.id` - see `service::create_sale`'s doc comment; this is also the
-/// function the offline-sync endpoint calls.
-pub async fn create(
+/**
+ * `POST /api/v1/sales`.
+ * Requires `sale.create` at the store.
+ * Idempotent by `body.id` - see `service::create_sale`'s doc comment; this is also the function the offline-sync endpoint calls.
+ */
+pub async fn create_sale(
     mut tx: TenantTx,
     Json(body): Json<CreateSaleRequest>,
 ) -> Result<Json<ApiEnvelope<Sale>>, ApiError> {
@@ -80,15 +106,15 @@ pub async fn create(
     .await?;
     let sale = service::create_sale(&mut tx, tenant_id, user_id, &body).await?;
     tx.commit().await?;
-    Ok(Json(ApiEnvelope::ok("Sale recorded.", sale)))
+    return Ok(Json(ApiEnvelope::ok("Sale recorded.", sale)));
 }
 
 /// `GET /api/v1/sales/:id/lines`.
-pub async fn lines(
+pub async fn list_sale_lines(
     Path(sale_id): Path<Uuid>,
     mut tx: TenantTx,
 ) -> Result<Json<ApiEnvelope<Vec<SaleLine>>>, ApiError> {
     let lines = service::list_sale_lines(&mut tx, sale_id).await?;
     tx.commit().await?;
-    Ok(Json(ApiEnvelope::ok("Sale lines fetched.", lines)))
+    return Ok(Json(ApiEnvelope::ok("Sale lines fetched.", lines)));
 }

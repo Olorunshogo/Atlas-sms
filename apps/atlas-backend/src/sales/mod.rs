@@ -10,13 +10,13 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn shifts_router() -> Router<AppState> {
-    Router::new()
+    return Router::new()
         .route("/", post(handlers::open_shift))
-        .route("/{id}/close", post(handlers::close_shift))
+        .route("/{id}/close", post(handlers::close_shift));
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/", get(handlers::list).post(handlers::create))
-        .route("/{id}/lines", get(handlers::lines))
+    return Router::new()
+        .route("/", get(handlers::list_sales).post(handlers::create_sale))
+        .route("/{id}/lines", get(handlers::list_sale_lines));
 }

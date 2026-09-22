@@ -427,3 +427,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Local pg_dump output from docker/backup-atlas.sh
+docker/backups/

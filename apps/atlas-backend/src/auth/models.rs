@@ -67,6 +67,13 @@ pub struct RefreshRequest {
     pub refresh_token: String,
 }
 
+// === Switch tenant
+
+#[derive(Debug, Deserialize)]
+pub struct SwitchTenantRequest {
+    pub tenant_id: Uuid,
+}
+
 // === Accept invite
 
 #[derive(Debug, Deserialize)]

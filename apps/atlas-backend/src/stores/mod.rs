@@ -8,5 +8,5 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(handlers::list).post(handlers::create))
+    return Router::new().route("/", get(handlers::list_stores).post(handlers::create_store));
 }

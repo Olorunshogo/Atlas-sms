@@ -5,10 +5,7 @@ use serde::Serialize;
 
 // === ApiError
 
-/**
- * Every handler error path funnels through this type so the response shape
- * (`{ message, success, code }`) stays consistent across the whole API.
- */
+/// Every handler error path funnels through this type so the response shape (`{ message, success, code }`) stays consistent across the whole API.
 #[derive(Debug)]
 pub enum ApiError {
     BadRequest {
@@ -25,36 +22,37 @@ pub enum ApiError {
         message: String,
         code: Option<&'static str>,
     },
+    TooManyRequests(String),
     Internal(String),
 }
 
 impl ApiError {
     pub fn bad_request(message: impl Into<String>) -> Self {
-        Self::BadRequest {
+        return ApiError::BadRequest {
             message: message.into(),
             code: None,
-        }
+        };
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {
-        Self::Forbidden {
+        return ApiError::Forbidden {
             message: message.into(),
             code: None,
-        }
+        };
     }
 
     pub fn bad_request_with_code(message: impl Into<String>, code: &'static str) -> Self {
-        Self::BadRequest {
+        return ApiError::BadRequest {
             message: message.into(),
             code: Some(code),
-        }
+        };
     }
 
     pub fn conflict_with_code(message: impl Into<String>, code: &'static str) -> Self {
-        Self::Conflict {
+        return ApiError::Conflict {
             message: message.into(),
             code: Some(code),
-        }
+        };
     }
 }
 
@@ -74,8 +72,9 @@ impl IntoResponse for ApiError {
             ApiError::Forbidden { message, code } => (StatusCode::FORBIDDEN, message, code),
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
             ApiError::Conflict { message, code } => (StatusCode::CONFLICT, message, code),
+            ApiError::TooManyRequests(message) => (StatusCode::TOO_MANY_REQUESTS, message, None),
             ApiError::Internal(message) => {
-                eprintln!("internal error: {message}");
+                eprintln!("internal error: {}", message);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Something went wrong".to_string(),
@@ -84,7 +83,7 @@ impl IntoResponse for ApiError {
             }
         };
 
-        (
+        return (
             status,
             Json(ErrorBody {
                 message,
@@ -92,18 +91,18 @@ impl IntoResponse for ApiError {
                 code,
             }),
         )
-            .into_response()
+            .into_response();
     }
 }
 
 impl From<sqlx::Error> for ApiError {
     fn from(err: sqlx::Error) -> Self {
-        ApiError::Internal(err.to_string())
+        return ApiError::Internal(err.to_string());
     }
 }
 
 impl From<argon2::password_hash::Error> for ApiError {
     fn from(err: argon2::password_hash::Error) -> Self {
-        ApiError::Internal(format!("password hashing failure: {err}"))
+        return ApiError::Internal(format!("password hashing failure: {}", err));
     }
 }

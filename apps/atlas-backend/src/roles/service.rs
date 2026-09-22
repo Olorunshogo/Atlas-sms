@@ -9,13 +9,13 @@ use super::models::Role;
 
 pub enum InviteOutcome {
     GrantedExisting,
-    /// Carries the raw (unhashed) token - only ever handed to the caller
-    /// once, to put in an email link. Never stored or logged as-is.
+    /// Carries the raw (unhashed) token - only ever handed to the caller once, to put in an email link.
+    /// Never stored or logged as-is.
     CreatedInvite { token: String, email: String },
 }
 
 pub async fn list_roles(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Vec<Role>, ApiError> {
-    sqlx::query_as::<_, Role>(
+    return sqlx::query_as::<_, Role>(
         "SELECT id, tenant_id, name, permissions::text[] AS permissions, is_system
          FROM atlas.roles
          WHERE tenant_id IS NULL OR tenant_id = $1
@@ -24,17 +24,12 @@ pub async fn list_roles(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Vec<
     .bind(tenant_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 /**
- * The one generic permission check every handler that gates on a
- * capability calls, rather than each action writing its own bespoke role
- * assertion. `store_id` is `None` for a tenant-wide action (e.g. opening a
- * new store); a caller's grant satisfies the check when it is a platform
- * grant, a tenant-wide grant matching `tenant_id`, a store grant matching
- * `store_id`, or a store-group grant covering `store_id` (the V2 regional-
- * manager case, already join-able even before the UI to manage it exists).
+ * The one generic permission check every handler that gates on a capability calls, rather than each action writing its own bespoke role assertion.
+ * `store_id` is `None` for a tenant-wide action (e.g. opening a new store); a caller's grant satisfies the check when it is a platform grant, a tenant-wide grant matching `tenant_id`, a store grant matching `store_id`, or a store-group grant covering `store_id` (the V2 regional-manager case, already join-able even before the UI to manage it exists).
  */
 pub async fn assert_permission(
     conn: &mut PgConnection,
@@ -70,21 +65,18 @@ pub async fn assert_permission(
     .fetch_optional(conn)
     .await?;
 
-    match granted {
+    return match granted {
         Some(_) => Ok(()),
         None => Err(ApiError::forbidden(format!(
-            "Missing permission: {permission}"
+            "Missing permission: {}",
+            permission
         ))),
-    }
+    };
 }
 
 /**
- * The union of every permission a caller effectively holds at this scope,
- * across however many role grants they have that reach it. Backs
- * `assert_grantable`: a granter's power to hand out a role is the
- * permissions they hold, not any single grant's permissions in isolation
- * (an admin who is also a store's stock_clerk still has the admin-level
- * union when inviting at that store).
+ * The union of every permission a caller effectively holds at this scope, across however many role grants they have that reach it.
+ * Backs `assert_grantable`: a granter's power to hand out a role is the permissions they hold, not any single grant's permissions in isolation (an admin who is also a store's stock_clerk still has the admin-level union when inviting at that store).
  */
 async fn effective_permissions(
     conn: &mut PgConnection,
@@ -92,7 +84,7 @@ async fn effective_permissions(
     tenant_id: Uuid,
     store_id: Option<Uuid>,
 ) -> Result<Vec<String>, ApiError> {
-    sqlx::query_scalar(
+    return sqlx::query_scalar(
         r#"
         SELECT DISTINCT unnest(r.permissions)::text
         FROM atlas.role_grants rg
@@ -115,15 +107,12 @@ async fn effective_permissions(
     .bind(store_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 /**
- * "A granter can never hand out more than they hold" - the rule that makes
- * the dynamic role system safe without a rigid hierarchy table. Compares
- * `target_role_id`'s full permission set against the granter's effective
- * permissions (above) at the same scope; any permission the target role
- * has that the granter doesn't is a 403.
+ * "A granter can never hand out more than they hold" - the rule that makes the dynamic role system safe without a rigid hierarchy table.
+ * Compares `target_role_id`'s full permission set against the granter's effective permissions (above) at the same scope; any permission the target role has that the granter doesn't is a 403.
  */
 pub async fn assert_grantable(
     conn: &mut PgConnection,
@@ -143,23 +132,21 @@ pub async fn assert_grantable(
 
     let ungranted = target_permissions.iter().find(|permission| !granter_permissions.contains(permission));
 
-    match ungranted {
+    return match ungranted {
         None => Ok(()),
         Some(permission) => Err(ApiError::forbidden(format!(
-            "You cannot grant a role with the \"{permission}\" permission, which you do not hold yourself."
+            "You cannot grant a role with the \"{}\" permission, which you do not hold yourself.",
+            permission
         ))),
-    }
+    };
 }
 
 /**
- * The two-branch invite (docs/atlas/auth-flow.md #5). An existing,
- * verified user has nothing left to prove - they get the `role_grants` row
- * directly, `status = 'active'`, no token needed. A brand-new email goes
- * through `atlas.invites`; accepting it (`auth::handlers::accept_invite`)
- * is what actually creates the user and the grant, in one transaction.
+ * The two-branch invite (docs/atlas/auth-flow.md #5).
+ * An existing, verified user has nothing left to prove - they get the `role_grants` row directly, `status = 'active'`, no token needed.
+ * A brand-new email goes through `atlas.invites`; accepting it (`auth::handlers::accept_invite`) is what actually creates the user and the grant, in one transaction.
  *
- * Callers must run `assert_grantable` first - this function trusts that
- * the containment check already happened, it doesn't repeat it.
+ * Callers must run `assert_grantable` first - this function trusts that the containment check already happened, it doesn't repeat it.
  */
 pub async fn invite(
     conn: &mut PgConnection,
@@ -215,5 +202,5 @@ pub async fn invite(
     .execute(conn)
     .await?;
 
-    Ok(InviteOutcome::CreatedInvite { token, email: email.to_string() })
+    return Ok(InviteOutcome::CreatedInvite { token, email: email.to_string() });
 }

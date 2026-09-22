@@ -19,6 +19,7 @@
         "commands": [
           "nx reset",
           "docker compose -f docker-compose.atlas.yml up -d postgres",
+          "sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\"",
           "docker compose -f docker-compose.atlas.yml up --build atlas-backend"
         ]
       }

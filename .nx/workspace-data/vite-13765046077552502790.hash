@@ -1,0 +1,182 @@
+{
+  "14482023211564214229apps/atlas-pos/vite.config.ts": {
+    "targets": {
+      "build": {
+        "command": "vite build",
+        "options": {
+          "cwd": "apps/atlas-pos"
+        },
+        "cache": true,
+        "dependsOn": [
+          "^build"
+        ],
+        "inputs": [
+          "default",
+          "^default",
+          {
+            "externalDependencies": [
+              "vite"
+            ]
+          }
+        ],
+        "outputs": [
+          "{projectRoot}/dist"
+        ],
+        "metadata": {
+          "technologies": [
+            "vite"
+          ],
+          "description": "Run Vite build",
+          "help": {
+            "command": "pnpm exec vite build --help",
+            "example": {
+              "options": {
+                "sourcemap": true,
+                "manifest": "manifest.json"
+              }
+            }
+          }
+        },
+        "syncGenerators": [
+          "@nx/js:typescript-sync"
+        ]
+      },
+      "serve": {
+        "continuous": true,
+        "command": "vite",
+        "options": {
+          "cwd": "apps/atlas-pos"
+        },
+        "metadata": {
+          "technologies": [
+            "vite"
+          ],
+          "description": "Starts Vite dev server",
+          "help": {
+            "command": "pnpm exec vite --help",
+            "example": {
+              "options": {
+                "port": 3000
+              }
+            }
+          },
+          "deprecated": "Use devTargetName instead. This option will be removed in Nx 22."
+        },
+        "syncGenerators": [
+          "@nx/js:typescript-sync"
+        ]
+      },
+      "dev": {
+        "continuous": true,
+        "command": "vite",
+        "options": {
+          "cwd": "apps/atlas-pos"
+        },
+        "metadata": {
+          "technologies": [
+            "vite"
+          ],
+          "description": "Starts Vite dev server",
+          "help": {
+            "command": "pnpm exec vite --help",
+            "example": {
+              "options": {
+                "port": 3000
+              }
+            }
+          }
+        },
+        "syncGenerators": [
+          "@nx/js:typescript-sync"
+        ]
+      },
+      "preview": {
+        "continuous": true,
+        "command": "vite preview",
+        "dependsOn": [
+          "build"
+        ],
+        "options": {
+          "cwd": "apps/atlas-pos"
+        },
+        "metadata": {
+          "technologies": [
+            "vite"
+          ],
+          "description": "Locally preview Vite production build",
+          "help": {
+            "command": "pnpm exec vite preview --help",
+            "example": {
+              "options": {
+                "port": 3000
+              }
+            }
+          }
+        }
+      },
+      "serve-static": {
+        "continuous": true,
+        "executor": "@nx/web:file-server",
+        "options": {
+          "buildTarget": "build",
+          "spa": true
+        },
+        "syncGenerators": [
+          "@nx/js:typescript-sync"
+        ]
+      },
+      "vite:typecheck": {
+        "cache": true,
+        "inputs": [
+          "default",
+          "^default",
+          {
+            "externalDependencies": [
+              "vue-tsc",
+              "typescript"
+            ]
+          }
+        ],
+        "command": "vue-tsc --build --emitDeclarationOnly",
+        "options": {
+          "cwd": "apps/atlas-pos"
+        },
+        "metadata": {
+          "description": "Runs type-checking for the project.",
+          "technologies": [
+            "typescript",
+            "vue"
+          ],
+          "help": {
+            "command": "pnpm exec vue-tsc --build --help",
+            "example": {
+              "args": [
+                "--force"
+              ]
+            }
+          }
+        },
+        "dependsOn": [
+          "^vite:typecheck"
+        ],
+        "syncGenerators": [
+          "@nx/js:typescript-sync"
+        ]
+      },
+      "vite:build-deps": {
+        "dependsOn": [
+          "^build"
+        ]
+      },
+      "vite:watch-deps": {
+        "continuous": true,
+        "dependsOn": [
+          "vite:build-deps"
+        ],
+        "command": "pnpm exec nx watch --projects atlas-pos --includeDependentProjects -- pnpm exec nx vite:build-deps atlas-pos"
+      }
+    },
+    "metadata": {},
+    "projectType": "application"
+  }
+}

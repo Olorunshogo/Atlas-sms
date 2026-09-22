@@ -7,16 +7,14 @@ use crate::error::ApiError;
 use super::models::{AdjustStockRequest, StockLevel, StockMovement, TransferStockRequest};
 
 /**
- * On-hand is never a stored column - it's `sum(quantity)` over the ledger
- * for a store, grouped by product. See `stock_movements`' migration
- * comment for why: a mutable quantity column invites silent drift from
- * the ledger that's supposed to be the source of truth.
+ * On-hand is never a stored column - it's `sum(quantity)` over the ledger for a store, grouped by product.
+ * See `stock_movements`' migration comment for why: a mutable quantity column invites silent drift from the ledger that's supposed to be the source of truth.
  */
 pub async fn on_hand_for_store(
     conn: &mut PgConnection,
     store_id: Uuid,
 ) -> Result<Vec<StockLevel>, ApiError> {
-    sqlx::query_as::<_, StockLevel>(
+    return sqlx::query_as::<_, StockLevel>(
         "SELECT product_id, SUM(quantity) AS on_hand
          FROM atlas.stock_movements
          WHERE store_id = $1
@@ -26,7 +24,7 @@ pub async fn on_hand_for_store(
     .bind(store_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 struct NewMovement<'a> {
@@ -45,7 +43,7 @@ async fn insert_movement(
     conn: &mut PgConnection,
     movement: NewMovement<'_>,
 ) -> Result<StockMovement, ApiError> {
-    sqlx::query_as::<_, StockMovement>(
+    return sqlx::query_as::<_, StockMovement>(
         "INSERT INTO atlas.stock_movements
             (id, tenant_id, store_id, product_id, stock_item_id, movement_type, quantity, reason, reference_id, created_by_user_id)
          VALUES ($1, $2, $3, $4, $5, $6::atlas.stock_movement_type, $7, $8, $9, $10)
@@ -63,7 +61,7 @@ async fn insert_movement(
     .bind(movement.created_by_user_id)
     .fetch_one(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 pub async fn adjust_stock(
@@ -72,7 +70,7 @@ pub async fn adjust_stock(
     user_id: Uuid,
     payload: &AdjustStockRequest,
 ) -> Result<StockMovement, ApiError> {
-    insert_movement(
+    return insert_movement(
         conn,
         NewMovement {
             tenant_id,
@@ -86,14 +84,12 @@ pub async fn adjust_stock(
             created_by_user_id: user_id,
         },
     )
-    .await
+    .await;
 }
 
 /**
- * Two movements in one transaction: `transfer_out` at the source store
- * (negative), `transfer_in` at the destination (positive). Both carry the
- * same `reference_id` so they're traceable as one transfer, not two
- * unrelated adjustments.
+ * Two movements in one transaction: `transfer_out` at the source store (negative), `transfer_in` at the destination (positive).
+ * Both carry the same `reference_id` so they're traceable as one transfer, not two unrelated adjustments.
  */
 pub async fn transfer_stock(
     conn: &mut PgConnection,
@@ -144,5 +140,5 @@ pub async fn transfer_stock(
     )
     .await?;
 
-    Ok((out_movement, in_movement))
+    return Ok((out_movement, in_movement));
 }

@@ -6,7 +6,7 @@ use crate::error::ApiError;
 use super::models::Tenant;
 
 pub async fn get_tenant(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Tenant, ApiError> {
-    sqlx::query_as::<_, Tenant>(
+    return sqlx::query_as::<_, Tenant>(
         "SELECT id, name, status::text AS status, created_at
          FROM atlas.tenants
          WHERE id = $1 AND deleted_at IS NULL",
@@ -14,5 +14,5 @@ pub async fn get_tenant(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Tena
     .bind(tenant_id)
     .fetch_optional(conn)
     .await?
-    .ok_or_else(|| ApiError::NotFound("Tenant not found.".to_string()))
+    .ok_or_else(|| ApiError::NotFound("Tenant not found.".to_string()));
 }

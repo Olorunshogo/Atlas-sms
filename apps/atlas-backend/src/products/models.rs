@@ -21,11 +21,11 @@ pub struct CreateProductTypeRequest {
 }
 
 fn default_attribute_schema() -> Value {
-    Value::Array(vec![])
+    return Value::Array(vec![]);
 }
 
 fn default_identity_mode() -> String {
-    "by_product".to_string()
+    return "by_product".to_string();
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -51,5 +51,5 @@ pub struct CreateProductRequest {
 }
 
 fn default_attributes() -> Value {
-    Value::Object(Default::default())
+    return Value::Object(Default::default());
 }

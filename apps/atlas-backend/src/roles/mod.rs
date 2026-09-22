@@ -8,5 +8,5 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(handlers::list)).route("/invite", post(handlers::invite))
+    return Router::new().route("/", get(handlers::list_roles)).route("/invite", post(handlers::invite));
 }

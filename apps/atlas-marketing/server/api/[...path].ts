@@ -1,3 +1,4 @@
+import { API_VERSION } from '../utils/api';
 import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
@@ -51,7 +52,7 @@ export default defineEventHandler(async (event) => {
     const refreshToken = getCookie(event, REFRESH_TOKEN_COOKIE);
 
     if (refreshToken) {
-      const refreshed = await $fetch.raw(`${apiBase}/auth/refresh`, {
+      const refreshed = await $fetch.raw(`${apiBase}/${API_VERSION}/auth/refresh`, {
         method: 'POST',
         headers: { cookie: `${REFRESH_TOKEN_COOKIE}=${refreshToken}` },
         ignoreResponseError: true,

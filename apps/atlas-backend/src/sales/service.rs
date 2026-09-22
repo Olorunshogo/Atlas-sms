@@ -3,6 +3,7 @@ use rust_decimal::Decimal;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::error::ApiError;
 
 use super::models::{
@@ -17,7 +18,7 @@ pub async fn open_shift(
     user_id: Uuid,
     payload: &OpenShiftRequest,
 ) -> Result<Shift, ApiError> {
-    sqlx::query_as::<_, Shift>(
+    return sqlx::query_as::<_, Shift>(
         "INSERT INTO atlas.shifts (id, tenant_id, store_id, opened_by_user_id, opening_cash_amount_minor)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, store_id, opened_by_user_id, opened_at, opening_cash_amount_minor,
@@ -36,7 +37,7 @@ pub async fn open_shift(
             ApiError::conflict_with_code("This store already has an open shift.", "SHIFT_ALREADY_OPEN")
         }
         other => ApiError::from(other),
-    })
+    });
 }
 
 pub async fn close_shift(
@@ -45,7 +46,7 @@ pub async fn close_shift(
     user_id: Uuid,
     payload: &CloseShiftRequest,
 ) -> Result<Shift, ApiError> {
-    sqlx::query_as::<_, Shift>(
+    return sqlx::query_as::<_, Shift>(
         "UPDATE atlas.shifts
          SET status = 'closed', closed_by_user_id = $2, closed_at = now(), closing_cash_amount_minor = $3
          WHERE id = $1 AND status = 'open'
@@ -57,18 +58,15 @@ pub async fn close_shift(
     .bind(payload.closing_cash_amount_minor)
     .fetch_optional(conn)
     .await?
-    .ok_or_else(|| ApiError::bad_request("Shift not found or already closed."))
+    .ok_or_else(|| ApiError::bad_request("Shift not found or already closed."));
 }
 
 // === Sales
 
 /**
- * Idempotent by `payload.id` (client-generated) - both the direct
- * `POST /api/v1/sales` path and the offline `POST /api/v1/sync/sales` path
- * call this same function. A sale synced twice (a flaky connection
- * retried) finds its own id already present and returns it unchanged
- * rather than double-charging stock. Stock is only ever adjusted the
- * first time a given sale id is accepted.
+ * Idempotent by `payload.id` (client-generated) - both the direct `POST /api/v1/sales` path and the offline `POST /api/v1/sync/sales` path call this same function.
+ * A sale synced twice (a flaky connection retried) finds its own id already present and returns it unchanged rather than double-charging stock.
+ * Stock is only ever adjusted the first time a given sale id is accepted.
  */
 pub async fn create_sale(
     conn: &mut PgConnection,
@@ -149,24 +147,38 @@ pub async fn create_sale(
         .await?;
     }
 
-    Ok(sale)
+    // Written here rather than by each of this function's two callers
+    // (`sales::handlers::create_sale`, `sync::handlers::sync_sale`) so it
+    // can sit after the idempotency check above - a retried/duplicate sync
+    // returns early and never reaches this line, so it can't double-audit
+    // a sale that was really only created once.
+    audit::record(
+        conn,
+        tenant_id,
+        cashier_user_id,
+        "sale",
+        sale.id,
+        "sale.create",
+        serde_json::to_value(&sale).ok(),
+    )
+    .await?;
+
+    return Ok(sale);
 }
 
 /**
- * Proper decimal money arithmetic, not integer truncation of `quantity` -
- * a 0.5kg line at a unit price still needs to bill half, not zero. Rounds
- * to the nearest minor unit (kobo/cent) since the ledger's smallest
- * representable amount is one.
+ * Proper decimal money arithmetic, not integer truncation of `quantity` - a 0.5kg line at a unit price still needs to bill half, not zero.
+ * Rounds to the nearest minor unit (kobo/cent) since the ledger's smallest representable amount is one.
  */
 fn line_total_minor(line: &super::models::SaleLineInput) -> Result<i64, ApiError> {
     let total = (Decimal::from(line.unit_price_amount_minor) * line.quantity).round();
-    total
+    return total
         .to_i64()
-        .ok_or_else(|| ApiError::bad_request("line total out of range"))
+        .ok_or_else(|| ApiError::bad_request("line total out of range"));
 }
 
 async fn fetch_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Option<Sale>, ApiError> {
-    sqlx::query_as::<_, Sale>(
+    return sqlx::query_as::<_, Sale>(
         "SELECT id, store_id, shift_id, customer_id, cashier_user_id, device_id, status::text AS status,
                 subtotal_amount_minor, discount_amount_minor, tax_amount_minor, total_amount_minor, created_at
          FROM atlas.sales WHERE id = $1",
@@ -174,14 +186,14 @@ async fn fetch_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Option<Sal
     .bind(sale_id)
     .fetch_optional(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 pub async fn list_sales_for_shift(
     conn: &mut PgConnection,
     shift_id: Uuid,
 ) -> Result<Vec<Sale>, ApiError> {
-    sqlx::query_as::<_, Sale>(
+    return sqlx::query_as::<_, Sale>(
         "SELECT id, store_id, shift_id, customer_id, cashier_user_id, device_id, status::text AS status,
                 subtotal_amount_minor, discount_amount_minor, tax_amount_minor, total_amount_minor, created_at
          FROM atlas.sales WHERE shift_id = $1 ORDER BY created_at",
@@ -189,14 +201,14 @@ pub async fn list_sales_for_shift(
     .bind(shift_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 pub async fn list_sale_lines(
     conn: &mut PgConnection,
     sale_id: Uuid,
 ) -> Result<Vec<SaleLine>, ApiError> {
-    sqlx::query_as::<_, SaleLine>(
+    return sqlx::query_as::<_, SaleLine>(
         "SELECT id, sale_id, product_id, stock_item_id, unit_id, quantity,
                 unit_price_amount_minor, line_total_amount_minor
          FROM atlas.sale_lines WHERE sale_id = $1 ORDER BY id",
@@ -204,5 +216,5 @@ pub async fn list_sale_lines(
     .bind(sale_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }

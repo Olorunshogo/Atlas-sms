@@ -12,10 +12,10 @@ pub struct ApiEnvelope<T> {
 
 impl<T> ApiEnvelope<T> {
     pub fn ok(message: impl Into<String>, data: T) -> Self {
-        Self {
+        return ApiEnvelope {
             message: message.into(),
             data,
             success: true,
-        }
+        };
     }
 }
