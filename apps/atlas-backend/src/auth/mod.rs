@@ -7,7 +7,7 @@ mod password;
 
 pub use jwt::{decode_access_token, Claims};
 
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 
 use crate::rate_limit;
@@ -22,9 +22,12 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/signup", post(handlers::signup))
         .route("/verify-email", post(handlers::verify_email))
         .route("/login", post(handlers::login))
+        .route("/me", get(handlers::get_session))
         .route("/refresh", post(handlers::refresh))
         .route("/logout", post(handlers::logout))
         .route("/switch-tenant", post(handlers::switch_tenant))
+        .route("/platform/tenants", get(handlers::list_platform_tenants))
+        .route("/platform/invite", post(handlers::invite_platform_staff))
         .route("/invites/{token}/accept", post(handlers::accept_invite))
         .route("/forgot-password", post(handlers::forgot_password))
         .route("/reset-password", post(handlers::reset_password))

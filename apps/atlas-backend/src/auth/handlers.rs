@@ -14,14 +14,19 @@ use crate::state::AppState;
 
 use super::cookies::{self, client_type, ClientType};
 use super::models::{
-    AcceptInviteRequest, AuthenticatedUser, ForgotPasswordRequest, LoginRequest, RefreshRequest, ResetPasswordRequest,
-    SessionData, SignupRequest, SignupResponseData, SwitchTenantRequest, VerifyEmailRequest,
+    AcceptInviteRequest, AuthenticatedUser, ChoiceErrorBody, ForgotPasswordRequest, LoginRequest, PlatformInviteRequest,
+    RefreshRequest, ResetPasswordRequest, SessionData, SessionProfile, SignupRequest, SignupResponseData,
+    SwitchTenantRequest, TenantChoice, TenantChoiceList, VerifyEmailRequest,
 };
 use super::{jwt, otp, password};
 
 /// Fixed id of the seeded `owner` system role (`atlas.roles`, migration `20260922000009_seed_system_roles.sql`) - signup always grants this one.
 fn owner_role_id() -> Uuid {
     return Uuid::parse_str("00000000-0000-7000-8000-000000000001").expect("valid constant uuid");
+}
+
+fn platform_admin_role_id() -> Uuid {
+    return Uuid::parse_str("00000000-0000-7000-8000-000000000007").expect("valid constant uuid");
 }
 
 // === Signup
@@ -285,29 +290,42 @@ pub async fn login(
         return Err(ApiError::forbidden("Please verify your email before logging in."));
     }
 
-    let active_tenant_ids: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT DISTINCT tenant_id FROM atlas.role_grants
-         WHERE user_id = $1 AND status = 'active' AND scope = 'tenant' AND deleted_at IS NULL",
-    )
-    .bind(user_id)
-    .fetch_all(&mut *tx)
-    .await?;
+    // Store-scoped staff (cashier, store manager) hold a tenant_id with scope
+    // 'store'. Counting only scope = 'tenant' locked them out of login.
+    let choices = list_grant_tenants(&mut tx, user_id).await?;
+    let platform_admin = is_platform_admin(&mut tx, user_id).await?;
 
-    let tenant_id = match (payload.tenant_id, active_tenant_ids.as_slice()) {
-        (Some(requested), tenants) if tenants.contains(&requested) => requested,
-        (Some(_), _) => return Err(ApiError::forbidden("You have no active role in that tenant.")),
-        (None, [only]) => *only,
-        (None, []) => {
+    let tenant_id = match (payload.tenant_id, choices.as_slice(), platform_admin) {
+        (Some(requested), choices, _) if choices.iter().any(|choice| choice.id == requested) => requested,
+        (Some(requested), _, true) => {
+            let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM atlas.tenants WHERE id = $1")
+                .bind(requested)
+                .fetch_optional(&mut *tx)
+                .await?;
+            exists.ok_or_else(|| ApiError::bad_request("Unknown tenant."))?
+        }
+        (Some(_), _, false) => return Err(ApiError::forbidden("You have no active role in that tenant.")),
+        (None, [only], _) => only.id,
+        (None, [], true) => {
+            let tenants = list_all_tenants(&mut tx).await?;
+            return Ok(tenant_choice_response(
+                "PLATFORM_TENANT_REQUIRED",
+                "Choose a tenant to enter.",
+                tenants,
+            ));
+        }
+        (None, [], false) => {
             return Err(ApiError::conflict_with_code(
                 "This account has no active role in any tenant.",
                 "ROLE_NOT_FOUND",
             ))
         }
-        (None, _multiple) => {
-            return Err(ApiError::conflict_with_code(
-                "This account belongs to more than one tenant. Specify tenant_id.",
+        (None, _, _) => {
+            return Ok(tenant_choice_response(
                 "TENANT_REQUIRED",
-            ))
+                "This account belongs to more than one tenant. Specify tenant_id.",
+                choices,
+            ));
         }
     };
 
@@ -457,7 +475,7 @@ pub async fn accept_invite(
 ) -> Result<Json<ApiEnvelope<()>>, ApiError> {
     let token_hash = crypto::hash_lookup_token(&token);
 
-    let invite: Option<(Uuid, Uuid, Option<Uuid>, Uuid, String)> = sqlx::query_as(
+    let invite: Option<(Uuid, Option<Uuid>, Option<Uuid>, Uuid, String)> = sqlx::query_as(
         "SELECT id, tenant_id, store_id, role_id, email FROM atlas.invites
          WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > now()",
     )
@@ -499,7 +517,13 @@ pub async fn accept_invite(
         }
     };
 
-    let scope = if store_id.is_some() { "store" } else { "tenant" };
+    let scope = if tenant_id.is_none() {
+        "platform"
+    } else if store_id.is_some() {
+        "store"
+    } else {
+        "tenant"
+    };
 
     sqlx::query(
         "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, store_id, status, granted_by_user_id)
@@ -675,7 +699,19 @@ pub async fn switch_tenant(
     .fetch_optional(&mut *tx)
     .await?;
 
-    has_grant.ok_or_else(|| ApiError::forbidden("You have no active role in that tenant."))?;
+    if has_grant.is_none() {
+        let platform_admin = is_platform_admin(&mut tx, claims.sub).await?;
+        if !platform_admin {
+            return Err(ApiError::forbidden("You have no active role in that tenant."));
+        }
+        let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM atlas.tenants WHERE id = $1")
+            .bind(payload.tenant_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if exists.is_none() {
+            return Err(ApiError::bad_request("Unknown tenant."));
+        }
+    }
 
     let user: (String, String) =
         sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1")
@@ -695,6 +731,190 @@ pub async fn switch_tenant(
         payload.tenant_id,
         authenticated_user,
     ));
+}
+
+// === Session profile
+
+/**
+ * `GET /api/v1/auth/me`.
+ * The marketing header and the POS home screen both need the signed-in user, the tenants they can switch to, and whether they are platform staff.
+ */
+pub async fn get_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut tx: AdminTx,
+) -> Result<Json<ApiEnvelope<SessionProfile>>, ApiError> {
+    let claims = jwt::decode_access_token(&bearer_token(&headers)?, &state.jwt_secret)?;
+    let user: (String, String) = sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1 AND deleted_at IS NULL")
+        .bind(claims.sub)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ApiError::Unauthorized("Unknown user.".to_string()))?;
+
+    let tenants = list_grant_tenants(&mut tx, claims.sub).await?;
+    let platform_admin = is_platform_admin(&mut tx, claims.sub).await?;
+    tx.commit().await?;
+
+    return Ok(Json(ApiEnvelope::ok(
+        "Session fetched.",
+        SessionProfile {
+            user: AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1 },
+            tenant_id: claims.tenant_id,
+            is_platform_admin: platform_admin,
+            tenants,
+        },
+    )));
+}
+
+/**
+ * `GET /api/v1/auth/platform/tenants`.
+ * Every tenant, for a platform admin choosing which business to enter.
+ * A tenant owner does not get this list.
+ */
+pub async fn list_platform_tenants(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut tx: AdminTx,
+) -> Result<Json<ApiEnvelope<Vec<TenantChoice>>>, ApiError> {
+    let claims = jwt::decode_access_token(&bearer_token(&headers)?, &state.jwt_secret)?;
+    let platform_admin = is_platform_admin(&mut tx, claims.sub).await?;
+    if !platform_admin {
+        return Err(ApiError::forbidden("Platform staff only."));
+    }
+    let tenants = list_all_tenants(&mut tx).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Tenants fetched.", tenants)));
+}
+
+/**
+ * `POST /api/v1/auth/platform/invite`.
+ * Only an existing platform admin can add another. An email that already has an account gets the grant immediately. A new email gets an invite link.
+ */
+pub async fn invite_platform_staff(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut tx: AdminTx,
+    Json(payload): Json<PlatformInviteRequest>,
+) -> Result<Json<ApiEnvelope<()>>, ApiError> {
+    let claims = jwt::decode_access_token(&bearer_token(&headers)?, &state.jwt_secret)?;
+    let platform_admin = is_platform_admin(&mut tx, claims.sub).await?;
+    if !platform_admin {
+        return Err(ApiError::forbidden("Platform staff only."));
+    }
+
+    let email = payload.email.trim().to_lowercase();
+    if !email.contains('@') {
+        return Err(ApiError::bad_request("Invalid email address."));
+    }
+
+    let role_id = platform_admin_role_id();
+    let existing_user_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM atlas.users WHERE email = $1 AND deleted_at IS NULL")
+            .bind(&email)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    if let Some(user_id) = existing_user_id {
+        sqlx::query(
+            "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, store_id, status, granted_by_user_id)
+             SELECT $1, $2, $3, 'platform', NULL, NULL, 'active', $4
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM atlas.role_grants
+                 WHERE user_id = $2 AND role_id = $3 AND scope = 'platform' AND deleted_at IS NULL
+             )",
+        )
+        .bind(Uuid::now_v7())
+        .bind(user_id)
+        .bind(role_id)
+        .bind(claims.sub)
+        .execute(&mut *tx)
+        .await?;
+
+        state
+            .email
+            .send(
+                &email,
+                "You've been added as Atlas platform staff",
+                "Log in to your existing Atlas account to use platform access.",
+            )
+            .await
+            .map_err(|err| ApiError::Internal(err.to_string()))?;
+    } else {
+        let token = crypto::generate_opaque_token();
+        let token_hash = crypto::hash_lookup_token(&token);
+        let expires_at = Utc::now() + Duration::days(7);
+
+        sqlx::query(
+            "INSERT INTO atlas.invites (id, tenant_id, store_id, role_id, email, token_hash, invited_by_user_id, expires_at)
+             VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(role_id)
+        .bind(&email)
+        .bind(&token_hash)
+        .bind(claims.sub)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await?;
+
+        state
+            .email
+            .send(
+                &email,
+                "You've been invited to Atlas",
+                &format!("You've been invited to join Atlas as platform staff. Use this token to accept: {}", token),
+            )
+            .await
+            .map_err(|err| ApiError::Internal(err.to_string()))?;
+    }
+
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Invitation sent.", ())));
+}
+
+async fn list_grant_tenants(tx: &mut AdminTx, user_id: Uuid) -> Result<Vec<TenantChoice>, ApiError> {
+    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT DISTINCT t.id, t.name
+         FROM atlas.role_grants rg
+         JOIN atlas.tenants t ON t.id = rg.tenant_id
+         WHERE rg.user_id = $1 AND rg.status = 'active' AND rg.deleted_at IS NULL AND rg.tenant_id IS NOT NULL
+         ORDER BY t.name",
+    )
+    .bind(user_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    return Ok(rows.into_iter().map(|(id, name)| TenantChoice { id, name }).collect());
+}
+
+async fn list_all_tenants(tx: &mut AdminTx) -> Result<Vec<TenantChoice>, ApiError> {
+    let rows: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT id, name FROM atlas.tenants ORDER BY name")
+            .fetch_all(&mut **tx)
+            .await?;
+    return Ok(rows.into_iter().map(|(id, name)| TenantChoice { id, name }).collect());
+}
+
+async fn is_platform_admin(tx: &mut AdminTx, user_id: Uuid) -> Result<bool, ApiError> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM atlas.role_grants
+         WHERE user_id = $1 AND scope = 'platform' AND status = 'active' AND deleted_at IS NULL
+         LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    return Ok(found.is_some());
+}
+
+fn tenant_choice_response(code: &'static str, message: &str, tenants: Vec<TenantChoice>) -> Response {
+    let body = ChoiceErrorBody {
+        message: message.to_string(),
+        success: false,
+        code,
+        data: TenantChoiceList { tenants },
+    };
+    return (StatusCode::CONFLICT, Json(body)).into_response();
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, ApiError> {
