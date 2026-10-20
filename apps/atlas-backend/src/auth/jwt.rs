@@ -9,7 +9,7 @@ use crate::error::ApiError;
 
 /**
  * `tenant_id` is the tenant the caller authenticated into.
- * A user holding grants in more than one tenant gets one token per tenant, never a token that spans tenants - switching tenants means logging in again (or later, a dedicated "switch tenant" endpoint that re-issues a token), same tradeoff Klassivox's auth.md documents as an open question for its own scope-switching case.
+ * A user holding grants in more than one tenant gets one token per tenant, never a token that spans tenants. Switching tenants re-issues a token for the other grant (`POST /api/v1/auth/switch-tenant`).
  */
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {

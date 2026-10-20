@@ -1,8 +1,7 @@
 // === EmailProvider
 
 /**
- * Swappable email transport - handlers depend on this trait through `AppState`, never on a concrete provider.
- * Same "providers are adapters, never core" reasoning as Klassivox's CONTEXT.md decision 10.
+ * Swappable email transport. Handlers depend on this trait through `AppState`, never on a concrete provider.
  */
 #[async_trait::async_trait]
 pub trait EmailProvider: Send + Sync {

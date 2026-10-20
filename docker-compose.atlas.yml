@@ -1,16 +1,13 @@
 #
-# Atlas's own compose stack, deliberately separate from docker-compose.yml
-# (Klassivox's). Not two services on one shared Postgres - a fully separate
-# server/container/volume, so a Postgres-level incident on one product has
-# no path to the other's data, on top of the atlas/public schema split
-# inside each database.
+# Atlas compose stack. Postgres, the API, and the data volume are this
+# file's own, on top of the atlas schema split inside the database.
 #
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    # 5434 on the host: distinct from Klassivox's 5433 and from a
-    # developer's own local Postgres on 5432, so all three can run at once.
+    # 5434 on the host, distinct from a developer's own local Postgres on
+    # 5432, so both can run at once.
     ports:
       - '5434:5432'
     environment:

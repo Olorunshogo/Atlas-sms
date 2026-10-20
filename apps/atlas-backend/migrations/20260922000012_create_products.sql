@@ -62,8 +62,7 @@ CREATE POLICY product_sale_units_isolation ON atlas.product_sale_units
 -- Per-store presence: not every branch stocks every product. Cost price is
 -- genuinely per-store (what that branch paid its supplier); selling price
 -- is not stored here at all - see price_rules. Money is amount_minor, not
--- a bare NUMERIC - never a currency-baked column name (same convention as
--- Klassivox's payments/refunds tables); the store's own `currency` column
+-- a bare NUMERIC - never a currency-baked column name; the store's own `currency` column
 -- is what it's minor units of.
 CREATE TABLE atlas.product_store_listings (
     id UUID PRIMARY KEY,

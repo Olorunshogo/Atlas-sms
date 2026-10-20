@@ -1,17 +1,14 @@
 # Atlas-sms - Locked Architecture Decisions
 
 Settled for this pass of scaffolding. Do not re-litigate without a real
-reason to. Where a decision differs from Klassivox's own `CONTEXT.md`, the
-difference is deliberate and explained - Atlas reuses Klassivox's *tooling*
-(Nx monorepo, Rust/Axum/sqlx/Postgres, Nuxt SSR, the TenantTx/RLS
-mechanism), not its domain model. See `docs/Atlas/README.md` for the
+reason to. The tooling is an Nx monorepo, Rust/Axum/sqlx/Postgres, Nuxt SSR,
+and the TenantTx/RLS mechanism. The domain model is Atlas's own: tenants
+and stores, not a school hierarchy. See `docs/atlas/README.md` for the
 product-level reasoning this schema is built from.
 
 ## 1. Flat tenant -> stores, no ancestor hierarchy
 
-Unlike Klassivox's self-referencing `organizations.parent_organization_id`
-(justified by diocese/state-ministry chains at national scale), Atlas's
-stated scale is 1-20 stores per tenant. `atlas.stores.tenant_id` is a
+Atlas's stated scale is 1-20 stores per tenant. `atlas.stores.tenant_id` is a
 direct FK, no chain-walking. Cross-store access for a role grant that isn't
 full tenant-wide is `atlas.store_group_grants`, not a parent/child tree.
 A real franchise/holding-company hierarchy (`tenants.parent_tenant_id`) is
@@ -29,8 +26,8 @@ handler calls - no per-action bespoke SQL).
 
 ## 3. Own Postgres server, own schema
 
-Atlas runs on its own Postgres server (`docker-compose.atlas.yml`),
-entirely separate from Klassivox's. Tables additionally live in an `atlas`
+Atlas runs on its own Postgres server (`docker-compose.atlas.yml`).
+Tables live in an `atlas`
 Postgres schema rather than `public`, and the app connects as `atlas_api`
 (never the superuser - RLS is bypassed entirely for a superuser
 connection). Both layers of separation exist so a bug or incident in one
@@ -48,14 +45,13 @@ platform-role work that intentionally crosses tenants.
 
 ## 5. UUIDv7, app-generated
 
-Same reasoning as Klassivox: sequential IDs would let a tenant enumerate
+Sequential IDs would let a tenant enumerate
 record counts off a public store slug. `Uuid::now_v7()` in Rust, never a
 DB default.
 
 ## 6. Web app naming: `atlas-marketing` does both marketing and dashboard
 
-Unlike Klassivox's split (`landing-page` vs `atlas-web`), Atlas's one
-Nuxt app, `apps/atlas-marketing`, carries both the public pages and the
+Atlas's one Nuxt app, `apps/atlas-marketing`, carries both the public pages and the
 authenticated owner/manager dashboard (Nitro proxy, cookie/Bearer auth,
 401-retry) under one name. Deliberate choice, made explicitly, not a
 default.
@@ -74,10 +70,8 @@ speculative feature.
 
 ## 8. No CI workflow yet
 
-Klassivox's own `ARCHITECTURE.md` documents a 4-tier CI pipeline as intent,
-but no `.github/workflows/` exists in this repo yet for either product.
-Atlas doesn't invent one unilaterally; it gets wired in alongside
-Klassivox's, when that work happens, not before.
+No `.github/workflows/` exists in this repo yet.
+CI gets wired when that work happens, not before.
 
 ## What shipped in this scaffolding pass
 
@@ -94,16 +88,16 @@ Klassivox's, when that work happens, not before.
 - `packages/atlas-ui/{core,web,app}` - full three-package split mirroring
   atlas-ui's build tooling (tsup, vite, vitest, Storybook on port 6007
   so it can run alongside atlas-ui's on 6006). No components ported
-  from Klassivox - `core`'s `lib/` and `components/ui/` are empty stubs
+  yet. `core`'s `lib/` and `components/ui/` are empty stubs
   with the directory shape in place; `web`/`app` just re-export `core`.
   Registered in `pnpm-workspace.yaml`.
 - `docs/v2.md` - V2-deferred scope tracker.
 
 ## What's still open
 
-- Auth (signup/login/JWT) - `atlas-backend` has no `auth` module yet;
-  the extractors currently trust raw headers, matching the same
-  documented pre-auth caveat Klassivox's `TenantTx` started with.
+- Auth endpoints live in `apps/atlas-backend/src/auth/`. What is still
+  open (client screens, and anything `docs/atlas/auth-flow.md` still marks
+  as planned) is tracked there.
 - `apps/atlas-pos` (POS client) - see item 7.
 - Product/inventory/sales/billing schema from
   `docs/atlas-sms-schema-notes.md` - not yet migrated.

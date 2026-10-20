@@ -4,7 +4,7 @@
  * it), never invite-flow-assignable by a tenant (the invite design in
  * docs/atlas/auth-flow.md only ever grants tenant/store-scope roles) -
  * provisioned by direct database action until an internal admin tool
- * exists, same posture as Klassivox's platform_admin/platform_ops.
+ * exists.
  */
 INSERT INTO atlas.roles (id, tenant_id, name, permissions, is_system) VALUES
     ('00000000-0000-7000-8000-000000000007', NULL, 'platform_admin', ARRAY[

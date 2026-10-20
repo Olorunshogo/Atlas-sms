@@ -40,8 +40,7 @@ export default [
 
       /**
        * React/react-hooks rules deliberately not enabled: the frontend is
-       * Vue/Nuxt (see docs/repo/ARCHITECTURE.md's Remix -> Nuxt migration
-       * decision).
+       * Vue/Nuxt.
        */
 
       // TypeScript rules
@@ -143,7 +142,7 @@ export default [
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       /**
        * Single-word component names are the norm here (e.g.
-       * KlassivoxDialogProvider is fine, but so is a plain `web-button.vue`
+       * DialogProvider is fine, but so is a plain `web-button.vue`
        * default-exported as `WebButton` per the existing @atlasui-web
        * convention) - don't force multi-word.
        */

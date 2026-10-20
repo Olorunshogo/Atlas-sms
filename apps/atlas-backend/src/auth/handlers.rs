@@ -448,7 +448,7 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 /**
  * `POST /api/v1/auth/invites/:token/accept`.
  * Looks the invite up by its lookup hash, creates the user if none exists yet for its email (pre-verified - receiving the link already proved control of the email, no separate OTP step), grants the invited role, and marks the invite accepted.
- * Routes to login next, same as signup - never auto-logs-in, per `docs/backend/auth.md`'s reasoning (Klassivox's, reused here): the user's first real action should be proving they can log in with what they just set.
+ * Routes to login next, same as signup. Never auto-logs-in: the user's first real action should be proving they can log in with what they just set.
  */
 pub async fn accept_invite(
     Path(token): Path<String>,

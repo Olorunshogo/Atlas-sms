@@ -1,11 +1,10 @@
 # Atlas Auth Flow
 
-What's built, what isn't yet, and the design for the rest - so the next
-pass implements against a plan rather than improvising per-endpoint. Mirrors
-Klassivox's `auth.md` in shape (same JWT + refresh-token architecture,
-adapted for Atlas's flat tenant model and `atlas-pos` in place of a second
-web app), not its content - Atlas's role model is `roles`/`role_grants`
-(dynamic, permission-array based), not Klassivox's fixed `app_role` enum.
+What's built, what isn't yet, and the design for the rest, so the next
+pass implements against a plan rather than improvising per-endpoint.
+JWT plus a rotating refresh token, on Atlas's flat tenant model.
+`atlas-pos` is a second client beside `atlas-marketing`. The role model is
+`roles`/`role_grants` (dynamic, permission-array based).
 
 ---
 
@@ -70,7 +69,7 @@ and later - opening store #2 needs no new grant for a tenant-scoped role).
 | `cashier`        | store           | **Invite** (#5), by anyone holding `staff.invite` at that store - in practice `owner`/`admin`/`store_manager`. |
 | `stock_clerk`    | store           | Same as `cashier`.                                                                                  |
 | `accountant`     | tenant or store | **Invite** (#5). Tenant-scoped when the owner wants one bookkeeper across every branch; store-scoped when a store manager wants their own. Both are the same role definition - only the grant's `store_id` differs. |
-| `platform_admin` | platform        | **Direct provisioning only** (migration `20260922000022_seed_platform_admin_role.sql` seeds the role; no endpoint grants it). Atlas's own staff, never a tenant-assignable role - same invariant as Klassivox's platform roles. An internal admin tool to invite platform staff is out of scope until Atlas has more than a couple of internal operators. |
+| `platform_admin` | platform        | **Direct provisioning only** (migration `20260922000022_seed_platform_admin_role.sql` seeds the role; no endpoint grants it). Atlas's own staff, never a tenant-assignable role. An internal admin tool to invite platform staff is out of scope until Atlas has more than a couple of internal operators. |
 
 Two invariants that hold across every row above, already enforced by
 `roles::service::assert_permission`'s "granter can't exceed their own
@@ -129,7 +128,7 @@ this is the one missing endpoint set.
 
 ### 6. Forgot / reset password (planned)
 
-Same shape as Klassivox's: `POST /api/v1/auth/forgot-password` always
+`POST /api/v1/auth/forgot-password` always
 returns the same message regardless of whether the email exists (anti-
 enumeration); consumes an OTP via `POST /api/v1/auth/reset-password`.
 Reuses the existing `email_otps` table with a new `purpose =
@@ -140,15 +139,13 @@ Reuses the existing `email_otps` table with a new `purpose =
 
 `atlas-marketing`'s Nitro proxy is the only client today, and it expects
 `Set-Cookie` (cookies read server-side, never handed to browser JS).
-`atlas-pos` is a Capacitor app with no server of its own - same problem
-Klassivox's auth.md solves with `X-Client-Type: app` returning tokens in
-the response body instead of a cookie.
+`atlas-pos` is a Capacitor app with no server of its own.
+`X-Client-Type: app` returns tokens in the response body instead of a cookie.
 
 Plan: `/auth/login` and `/auth/refresh` branch on `X-Client-Type`
 (`web` -> cookies only, no tokens in the body; `app` -> tokens in the body,
-no `Set-Cookie`), exactly Klassivox's resolution, for exactly the same
-reason (a `capacitor://` origin can't reliably receive an HttpOnly cookie
-cross-site). `X-Client-Type` is a response-shape hint only, never a
+no `Set-Cookie`). A `capacitor://` origin can't reliably receive an HttpOnly cookie
+cross-site. `X-Client-Type` is a response-shape hint only, never a
 permission boundary - neither mode may grant more than the other.
 `atlas-pos` keeps the refresh token in Capacitor secure storage and the
 access token in memory only, never `localStorage` - load-bearing given a

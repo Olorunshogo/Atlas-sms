@@ -1,10 +1,6 @@
 /*
- * Row Level Security, same fail-closed mechanism as Klassivox's
- * TenantTx/RLS pair, renamed for this product: `atlas_app` (privilege
- * holder) / `atlas_api` (the login role the app actually connects as).
- * These names deliberately do not collide with klassivox_app/klassivox_api
- * even though Atlas runs on its own server, in case the two ever share an
- * instance later.
+ * Row Level Security, fail-closed: `atlas_app` holds privileges and
+ * `atlas_api` is the non-superuser login role the app connects as.
  *
  * Policies read two transaction-local settings the Rust TenantTx
  * equivalent sets via set_config(..., true) immediately after BEGIN:
@@ -76,7 +72,7 @@ CREATE POLICY roles_isolation ON atlas.roles
     );
 
 /*
- * atlas.users carries no policy on purpose, same reasoning as Klassivox:
+ * atlas.users carries no policy on purpose:
  * not tenant-scoped (one human, many role grants across many tenants),
  * reachable only through atlas.role_grants, which is policed above.
  */

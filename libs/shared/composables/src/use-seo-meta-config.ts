@@ -15,7 +15,7 @@ export interface SeoMetaPageConfig {
 }
 
 /**
- * Site-wide defaults every Klassivox Nuxt app supplies via its own
+ * Site-wide defaults every Atlas Nuxt app supplies via its own
  * `nuxt.config.ts` (`runtimeConfig.public.seo`) - never hardcoded here,
  * since `atlas-web` and `landing-page` are different domains/products
  * and shouldn't share a site URL, OG image, or Twitter handle.
@@ -34,7 +34,7 @@ export interface SeoRuntimeConfig {
 // === Composable
 
 /**
- * One SEO composable for every Klassivox Nuxt app - combines `useHead`
+ * One SEO composable for every Atlas Nuxt app. Combines `useHead`
  * (canonical link, favicon, lang) and `useSeoMeta` (OG/Twitter tags) so a
  * page only has to supply what's page-specific. Site-wide defaults come
  * from `useRuntimeConfig().public.seo`, set once per app.

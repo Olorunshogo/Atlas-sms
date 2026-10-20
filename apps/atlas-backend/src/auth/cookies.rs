@@ -29,7 +29,7 @@ pub const REFRESH_TOKEN_COOKIE: &str = "refresh_token";
 
 /**
  * `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` - client-side JS never reads these, and they ride along on the proxy's own same-site requests to `atlas-backend`.
- * Host-only (no `Domain=`) deliberately: Atlas has no per-tenant subdomain requiring a shared cookie domain, unlike Klassivox's school-subdomain isolation.
+ * Host-only (no `Domain=`) deliberately: Atlas has no per-tenant subdomain that would need a shared cookie domain.
  */
 pub fn build_cookie(name: &str, value: &str, max_age_seconds: i64) -> String {
     return format!("{}={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age={}", name, value, max_age_seconds);

@@ -2,7 +2,7 @@ import * as z from 'zod';
 
 /**
  * Reusable zod rule factories - the single source of truth for "what does a
- * valid email/phone/password/etc. look like" across every Klassivox form.
+ * valid email/phone/password/etc. look like" across every Atlas form.
  * Ported from Stayar's schemas/generics.ts pattern (factory functions that
  * take a custom error message, return a zod schema), ahead of any real input
  * field consuming them yet - no page imports this today. Import a rule only
@@ -73,9 +73,8 @@ export function createRequiredString(fieldName: string, message?: string) {
 }
 
 /**
- * Longer free-text field (notes, KYC rejection reasons, report-card
- * comments). Not in Stayar's original generics.ts - added for Klassivox
- * since school-domain forms need this more than Stayar's did. `max` guards
+ * Longer free-text field (notes, rejection reasons, receipt comments).
+ * Not in Stayar's original generics.ts. `max` guards
  * against unbounded text hitting the database/PDF-generation layer.
  */
 export function createLongTextSchema(
@@ -91,11 +90,9 @@ export function createLongTextSchema(
 }
 
 /**
- * Calendar date field (date of birth, academic year start/end, attendance
- * date). Not in Stayar's original generics.ts (a rental platform had no
- * real need for it) - Klassivox's domain (student DOB, academic terms,
- * attendance) needs this constantly, so it's added here rather than
- * reinvented per form. Expects an ISO date string ("YYYY-MM-DD") since
+ * Calendar date field (date of birth, expiry, shift date). Not in Stayar's
+ * original generics.ts (a rental platform had no real need for it). Added
+ * here rather than reinvented per form. Expects an ISO date string ("YYYY-MM-DD") since
  * that's what a native `<input type="date">` and most date pickers emit;
  * `min`/`max` are optional ISO-date bounds (e.g. DOB must be in the past).
  */

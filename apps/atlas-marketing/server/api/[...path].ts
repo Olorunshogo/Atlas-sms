@@ -13,9 +13,7 @@ import {
  * forwards to atlas-backend, and retries once on a 401 via the refresh
  * token. Runs as a Cloudflare Pages Function via Nitro.
  *
- * Unlike atlas-web, Atlas has no per-tenant subdomain (Klassivox's
- * host-only cookie scoping is a child-safety decision specific to schools,
- * not something Atlas's PRD asks for) - x-tenant-id/x-store-id are read
+ * Atlas has no per-tenant subdomain. x-tenant-id/x-store-id are read
  * from cookies set at login instead of derived from the host. Once JWT
  * verification lands on atlas-backend, these become claims read off the
  * verified token rather than trusted cookies, same evolution path

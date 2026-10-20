@@ -41,11 +41,15 @@ The `libs/shared/*` packages keep the `@atlas*` npm scope even though they're co
 
 ---
 
-## Why `atlas-*` is still here
+## Apps
 
-Atlas was scaffolded by reusing a proven, already-built Rust/Axum + Nuxt + Nx setup rather than starting from zero - the `atlas-*` apps and packages are that source. Concretely, Atlas's own code borrows their *patterns*, not their code: row-level tenant isolation via a `TenantTx`-style Axum extractor, JWT + refresh-token auth, the Nx/pnpm workspace shape, and the tsup/Storybook component-package layout.
+New feature work targets the three apps in this repo:
 
-Klassivox itself is a separate, real product (multi-tenant school management) with its own repository. The copy of it in this repo exists only as scaffolding reference and is retired incrementally, one piece at a time, as each part gets its own Atlas-specific equivalent (tests, auth, the RLS migrations, and so on) - not as a single wholesale rename. New feature work targets the `atlas-*` apps; treat anything under a `atlas-*` path as read-only reference unless you're specifically the one retiring it.
+- `atlas-backend` is the API.
+- `atlas-marketing` is the public site and the owner/manager dashboard.
+- `atlas-pos` is the point-of-sale client.
+
+Tenant isolation is a `TenantTx` Axum extractor plus Postgres row-level security. Auth is JWT plus a rotating refresh token. The UI packages are Vue libraries built with `tsup` and Storybook.
 
 ---
 

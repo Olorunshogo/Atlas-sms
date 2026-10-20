@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Klassivox Nx monorepo for multi-tenant school management platform.",
+  "description": "Atlas Nx monorepo for a multi-tenant retail and point-of-sale platform.",
   "keywords": [
     "atlas",
-    "school-management-system",
-    "education-saas",
+    "store-management-system",
+    "point-of-sale",
     "nx-monorepo",
     "nuxt",
     "vue",
@@ -22,12 +22,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Zunetra/Klassivox.git"
+    "url": "git+https://github.com/Olorunshogo/Atlas-sms.git"
   },
   "bugs": {
-    "url": "https://github.com/Zunetra/Klassivox/issues"
+    "url": "https://github.com/Olorunshogo/Atlas-sms/issues"
   },
-  "homepage": "https://github.com/Zunetra/Klassivox#readme",
+  "homepage": "https://github.com/Olorunshogo/Atlas-sms#readme",
   "engines": {
     "node": ">=24",
     "pnpm": ">=10"

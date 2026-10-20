@@ -9,10 +9,9 @@
 @import 'tailwindcss';
 
 /*
- * Neutral placeholder tokens (see docs/frontend/design/THEME.md). Klassivox
- * has not chosen its own visual identity yet - swap the values below in
- * place when it does, keeping the same token names so components don't
- * need to change.
+ * Neutral placeholder tokens. Atlas has not chosen its own visual identity
+ * yet. Swap the values below in place when it does, keeping the same token
+ * names so components don't need to change.
  */
 :root {
   /* === Surfaces */
@@ -33,7 +32,7 @@
   --border-firm: #d4d4d8;
   --border-inked: #0a0a0a;
 
-  /* === Brand accent - neutral placeholder until Klassivox picks a hue */
+  /* === Brand accent - neutral placeholder until Atlas picks a hue */
   --brand: #18181b;
   --brand-hover: #27272a;
   --brand-soft: #f4f4f5;
@@ -201,7 +200,7 @@
   }
 }
 
-/* === Shared modal/dialog engine (KlassivoxDialog) - Ionic host styles for @atlasui-app */
+/* === Shared modal/dialog engine - Ionic host styles for @atlas/ui-app */
 ion-modal.atlas-dialog {
   --width: fit-content;
   --min-width: 250px;
