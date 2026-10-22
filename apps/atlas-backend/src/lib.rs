@@ -22,6 +22,7 @@ mod pricing;
 mod products;
 mod purchasing;
 mod rate_limit;
+mod reports;
 mod response;
 pub mod roles;
 mod sales;
@@ -90,5 +91,6 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/shifts", API_PREFIX), sales::shifts_router())
         .nest(&format!("{}/sales", API_PREFIX), sales::router())
         .nest(&format!("{}/sync", API_PREFIX), sync::router())
+        .nest(&format!("{}/reports", API_PREFIX), reports::router())
         .with_state(state);
 }
