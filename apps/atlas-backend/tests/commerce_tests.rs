@@ -377,7 +377,7 @@ async fn recording_a_payment_and_running_it_through_the_refund_flow_works(pool: 
         &router,
         &format!("/api/v1/payments/{}/refund", payment_id),
         Some(&token),
-        json!({ "amount_minor": 1000 }),
+        json!({ "amount_minor": 1000, "reason": "Goodwill" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
