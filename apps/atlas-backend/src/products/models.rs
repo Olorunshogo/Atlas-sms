@@ -38,6 +38,8 @@ pub struct Product {
     pub sku: Option<String>,
     pub attributes: Value,
     pub is_active: bool,
+    pub tax_rate_id: Option<Uuid>,
+    pub is_returnable: bool,
 }
 
 #[derive(Debug, Deserialize)]

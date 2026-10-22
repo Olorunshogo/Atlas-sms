@@ -50,7 +50,7 @@ pub async fn list_products(
     tenant_id: Uuid,
 ) -> Result<Vec<Product>, ApiError> {
     return sqlx::query_as::<_, Product>(
-        "SELECT id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active
+        "SELECT id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active, tax_rate_id, is_returnable
          FROM atlas.products
          WHERE tenant_id = $1 AND deleted_at IS NULL
          ORDER BY name",
@@ -69,7 +69,7 @@ pub async fn create_product(
     return sqlx::query_as::<_, Product>(
         "INSERT INTO atlas.products (id, tenant_id, product_type_id, base_unit_id, name, sku, attributes)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active",
+         RETURNING id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active, tax_rate_id, is_returnable",
     )
     .bind(Uuid::now_v7())
     .bind(tenant_id)
