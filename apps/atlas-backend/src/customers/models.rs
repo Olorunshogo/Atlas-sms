@@ -115,10 +115,13 @@ pub struct Page<T> {
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct PurchaseHistoryEntry {
     pub sale_id: Uuid,
+    pub receipt_number: Option<String>,
     pub store_id: Uuid,
     pub store_name: String,
     pub status: String,
+    pub payment_status: String,
     pub total_amount_minor: i64,
+    pub amount_refunded_minor: i64,
     pub created_at: DateTime<Utc>,
 }
 

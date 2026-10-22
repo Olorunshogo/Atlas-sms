@@ -72,7 +72,7 @@ pub async fn shift_store_id(conn: &mut PgConnection, shift_id: Uuid) -> Result<U
 // === Sales
 
 pub const SALE_COLUMNS: &str = "s.id, s.store_id, s.shift_id, s.customer_id, s.cashier_user_id, s.device_id,
-     s.status::text AS status, s.currency, s.subtotal_amount_minor, s.discount_amount_minor,
+     s.status::text AS status, s.receipt_number, s.currency, s.subtotal_amount_minor, s.discount_amount_minor,
      s.cart_discount_amount_minor, s.discount_reason, s.tax_amount_minor, s.total_amount_minor,
      s.rounding_adjustment_minor, s.amount_paid_minor, s.amount_refunded_minor,
      s.payment_status::text AS payment_status, s.prices_include_tax, s.price_overridden, s.client_created_at,
@@ -115,17 +115,6 @@ pub async fn sale_detail(conn: &mut PgConnection, sale: Sale) -> Result<SaleDeta
     let lines = list_sale_lines(conn, sale.id).await?;
     let payments = payments::list_payments_for_sale(conn, sale.id).await?;
     return Ok(SaleDetail { sale, lines, payments });
-}
-
-pub async fn list_sales_for_shift(conn: &mut PgConnection, shift_id: Uuid) -> Result<Vec<Sale>, ApiError> {
-    return sqlx::query_as::<_, Sale>(&format!(
-        "SELECT {} FROM atlas.sales s WHERE s.shift_id = $1 ORDER BY s.created_at",
-        SALE_COLUMNS
-    ))
-    .bind(shift_id)
-    .fetch_all(conn)
-    .await
-    .map_err(ApiError::from);
 }
 
 pub async fn list_sale_lines(conn: &mut PgConnection, sale_id: Uuid) -> Result<Vec<SaleLine>, ApiError> {

@@ -101,6 +101,7 @@ pub struct Sale {
     pub cashier_user_id: Uuid,
     pub device_id: String,
     pub status: String,
+    pub receipt_number: Option<String>,
     pub currency: String,
     pub subtotal_amount_minor: i64,
     pub discount_amount_minor: i64,

@@ -22,7 +22,7 @@ use crate::pricing::quote::{self, QuoteContext};
 use crate::pricing::resolver;
 
 use super::models::{CreateSaleRequest, PaymentInputStatus, Sale, SaleDetail};
-use super::service;
+use super::{receipts, service};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckoutMode {
@@ -187,8 +187,8 @@ pub async fn create_sale(
 }
 
 /**
- * Moves a sale to `completed`: deducts its stock through the inventory service (in base units, against the sale as `reference_id`) and stamps `completed_at`.
- * Shared by checkout and by a pending payment that later succeeds.
+ * Moves a sale to `completed`: issues its receipt number and snapshot, deducts its stock through the inventory service (in base units, against the sale as `reference_id`) and stamps `completed_at`.
+ * Shared by checkout and by a pending payment that later succeeds. The receipt comes before the stock so locks are always taken in the same order - receipt counter, then inventory - and a sale rejected for stock rolls its receipt number back with it.
  */
 pub async fn complete_sale(
     conn: &mut PgConnection,
@@ -197,6 +197,7 @@ pub async fn complete_sale(
     actor_user_id: Uuid,
     policy: NegativeStockPolicy,
 ) -> Result<(), ApiError> {
+    receipts::issue(conn, tenant_id, sale_id).await?;
     let sale = service::get_sale(conn, sale_id).await?;
     let lines = service::list_sale_lines(conn, sale_id).await?;
     let posting_lines: Vec<PostingLine> = lines

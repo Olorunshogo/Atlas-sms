@@ -202,8 +202,8 @@ pub async fn purchase_history(
     limit: i64,
 ) -> Result<Vec<PurchaseHistoryEntry>, ApiError> {
     return sqlx::query_as::<_, PurchaseHistoryEntry>(
-        "SELECT s.id AS sale_id, s.store_id, st.name AS store_name, s.status::text AS status,
-                s.total_amount_minor, s.created_at
+        "SELECT s.id AS sale_id, s.receipt_number, s.store_id, st.name AS store_name, s.status::text AS status,
+                s.payment_status::text AS payment_status, s.total_amount_minor, s.amount_refunded_minor, s.created_at
          FROM atlas.sales s
          JOIN atlas.stores st ON st.id = s.store_id
          WHERE s.customer_id = $1
