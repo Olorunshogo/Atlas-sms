@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::error::ApiError;
+use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 
 use super::models::{
     CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, Sale, SaleLine, Shift,
@@ -137,23 +138,35 @@ pub async fn create_sale(
         .bind(line_total)
         .execute(&mut *conn)
         .await?;
-
-        sqlx::query(
-            "INSERT INTO atlas.stock_movements
-                (id, tenant_id, store_id, product_id, stock_item_id, movement_type, quantity, reason, reference_id, created_by_user_id)
-             VALUES ($1, $2, $3, $4, $5, 'sale', $6, 'Sale', $7, $8)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(tenant_id)
-        .bind(payload.store_id)
-        .bind(line.product_id)
-        .bind(line.stock_item_id)
-        .bind(-line.quantity)
-        .bind(sale.id)
-        .bind(cashier_user_id)
-        .execute(&mut *conn)
-        .await?;
     }
+
+    // Interim: routed through the inventory service so the ledger has one
+    // writer; the checkout rewrite replaces this whole function.
+    let posting_lines: Vec<PostingLine> = payload
+        .lines
+        .iter()
+        .map(|line| PostingLine {
+            product_id: line.product_id,
+            stock_item_id: line.stock_item_id,
+            unit_id: Some(line.unit_id),
+            quantity: line.quantity,
+        })
+        .collect();
+    inventory::service::post(
+        conn,
+        Posting {
+            tenant_id,
+            store_id: payload.store_id,
+            movement_type: MovementType::Sale,
+            reason: "Sale",
+            reference_id: Some(sale.id),
+            actor_user_id: cashier_user_id,
+            policy: NegativeStockPolicy::Allow,
+            source: "sale",
+            lines: &posting_lines,
+        },
+    )
+    .await?;
 
     // Written here rather than by each of this function's two callers
     // (`sales::handlers::create_sale`, `sync::handlers::sync_sale`) so it

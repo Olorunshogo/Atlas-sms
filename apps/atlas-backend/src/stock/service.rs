@@ -3,6 +3,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 
 use super::models::{AdjustStockRequest, StockLevel, StockMovement, TransferStockRequest};
 
@@ -27,64 +28,37 @@ pub async fn on_hand_for_store(
     .map_err(ApiError::from);
 }
 
-struct NewMovement<'a> {
-    tenant_id: Uuid,
-    store_id: Uuid,
-    product_id: Uuid,
-    stock_item_id: Option<Uuid>,
-    movement_type: &'a str,
-    quantity: Decimal,
-    reason: &'a str,
-    reference_id: Option<Uuid>,
-    created_by_user_id: Uuid,
-}
-
-async fn insert_movement(
-    conn: &mut PgConnection,
-    movement: NewMovement<'_>,
-) -> Result<StockMovement, ApiError> {
-    return sqlx::query_as::<_, StockMovement>(
-        "INSERT INTO atlas.stock_movements
-            (id, tenant_id, store_id, product_id, stock_item_id, movement_type, quantity, reason, reference_id, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6::atlas.stock_movement_type, $7, $8, $9, $10)
-         RETURNING id, store_id, product_id, stock_item_id, movement_type::text AS movement_type, quantity, reason",
-    )
-    .bind(Uuid::now_v7())
-    .bind(movement.tenant_id)
-    .bind(movement.store_id)
-    .bind(movement.product_id)
-    .bind(movement.stock_item_id)
-    .bind(movement.movement_type)
-    .bind(movement.quantity)
-    .bind(movement.reason)
-    .bind(movement.reference_id)
-    .bind(movement.created_by_user_id)
-    .fetch_one(conn)
-    .await
-    .map_err(ApiError::from);
-}
-
+/**
+ * A count correction or write-off. Never blocked by the negative-stock check - a physical count is the authority the ledger is being corrected to, not a request that might overdraw it.
+ */
 pub async fn adjust_stock(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     user_id: Uuid,
     payload: &AdjustStockRequest,
 ) -> Result<StockMovement, ApiError> {
-    return insert_movement(
+    let lines = [PostingLine {
+        product_id: payload.product_id,
+        stock_item_id: payload.stock_item_id,
+        unit_id: None,
+        quantity: payload.quantity,
+    }];
+    let mut movements = inventory::service::post(
         conn,
-        NewMovement {
+        Posting {
             tenant_id,
             store_id: payload.store_id,
-            product_id: payload.product_id,
-            stock_item_id: payload.stock_item_id,
-            movement_type: "adjustment",
-            quantity: payload.quantity,
+            movement_type: MovementType::Adjustment,
             reason: &payload.reason,
             reference_id: None,
-            created_by_user_id: user_id,
+            actor_user_id: user_id,
+            policy: NegativeStockPolicy::Allow,
+            source: "adjustment",
+            lines: &lines,
         },
     )
-    .await;
+    .await?;
+    return Ok(movements.remove(0));
 }
 
 /**
@@ -107,38 +81,45 @@ pub async fn transfer_stock(
     }
 
     let reference_id = Uuid::now_v7();
+    let lines = [PostingLine {
+        product_id: payload.product_id,
+        stock_item_id: payload.stock_item_id,
+        unit_id: None,
+        quantity: payload.quantity,
+    }];
 
-    let out_movement = insert_movement(
+    // The sending store can't give away stock it doesn't have.
+    let mut out_movements = inventory::service::post(
         conn,
-        NewMovement {
+        Posting {
             tenant_id,
             store_id: payload.from_store_id,
-            product_id: payload.product_id,
-            stock_item_id: payload.stock_item_id,
-            movement_type: "transfer_out",
-            quantity: -payload.quantity,
+            movement_type: MovementType::TransferOut,
             reason: &payload.reason,
             reference_id: Some(reference_id),
-            created_by_user_id: user_id,
+            actor_user_id: user_id,
+            policy: NegativeStockPolicy::Reject,
+            source: "transfer",
+            lines: &lines,
         },
     )
     .await?;
 
-    let in_movement = insert_movement(
+    let mut in_movements = inventory::service::post(
         conn,
-        NewMovement {
+        Posting {
             tenant_id,
             store_id: payload.to_store_id,
-            product_id: payload.product_id,
-            stock_item_id: payload.stock_item_id,
-            movement_type: "transfer_in",
-            quantity: payload.quantity,
+            movement_type: MovementType::TransferIn,
             reason: &payload.reason,
             reference_id: Some(reference_id),
-            created_by_user_id: user_id,
+            actor_user_id: user_id,
+            policy: NegativeStockPolicy::Allow,
+            source: "transfer",
+            lines: &lines,
         },
     )
     .await?;
 
-    return Ok((out_movement, in_movement));
+    return Ok((out_movements.remove(0), in_movements.remove(0)));
 }

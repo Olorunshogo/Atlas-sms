@@ -30,13 +30,4 @@ pub struct TransferStockRequest {
     pub reason: String,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct StockMovement {
-    pub id: Uuid,
-    pub store_id: Uuid,
-    pub product_id: Uuid,
-    pub stock_item_id: Option<Uuid>,
-    pub movement_type: String,
-    pub quantity: Decimal,
-    pub reason: String,
-}
+pub use crate::inventory::StockMovement;

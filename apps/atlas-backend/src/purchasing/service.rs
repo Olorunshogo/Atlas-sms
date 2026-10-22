@@ -4,6 +4,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 
 use super::models::{
     CreatePurchaseOrderRequest, GoodsReceivedNoteData, PurchaseOrder, PurchaseOrderLine, ReceiveGoodsRequest,
@@ -205,21 +206,28 @@ pub async fn receive_goods(
             )));
         }
 
-        let movement_id = Uuid::now_v7();
-        sqlx::query(
-            "INSERT INTO atlas.stock_movements
-                (id, tenant_id, store_id, product_id, movement_type, quantity, reason, reference_id, created_by_user_id)
-             VALUES ($1, $2, $3, $4, 'purchase_receipt', $5, 'Goods received', $6, $7)",
+        let receipt_lines = [PostingLine {
+            product_id,
+            stock_item_id: None,
+            unit_id: None,
+            quantity: line.quantity_received,
+        }];
+        let movements = inventory::service::post(
+            conn,
+            Posting {
+                tenant_id,
+                store_id,
+                movement_type: MovementType::PurchaseReceipt,
+                reason: "Goods received",
+                reference_id: Some(grn_id),
+                actor_user_id: received_by_user_id,
+                policy: NegativeStockPolicy::Allow,
+                source: "goods_received",
+                lines: &receipt_lines,
+            },
         )
-        .bind(movement_id)
-        .bind(tenant_id)
-        .bind(store_id)
-        .bind(product_id)
-        .bind(line.quantity_received)
-        .bind(grn_id)
-        .bind(received_by_user_id)
-        .execute(&mut *conn)
         .await?;
+        let movement_id = movements[0].id;
 
         sqlx::query(
             "INSERT INTO atlas.goods_received_note_lines
