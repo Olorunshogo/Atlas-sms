@@ -101,6 +101,7 @@ pub mod codes {
     pub const CUSTOMER_REQUIRED: &str = "CUSTOMER_REQUIRED";
     pub const CUSTOMER_PHONE_EXISTS: &str = "CUSTOMER_PHONE_EXISTS";
     pub const STORE_REQUIRED: &str = "STORE_REQUIRED";
+    pub const BARCODE_EXISTS: &str = "BARCODE_EXISTS";
 }
 
 #[derive(Serialize)]

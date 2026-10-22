@@ -10,6 +10,7 @@ use sqlx::PgPool;
 
 mod audit;
 mod auth;
+mod catalog;
 mod crypto;
 mod customers;
 mod email;
@@ -17,6 +18,7 @@ mod error;
 mod extractors;
 mod inventory;
 mod payments;
+mod pricing;
 mod products;
 mod purchasing;
 mod rate_limit;
@@ -74,7 +76,8 @@ pub fn api_router(state: AppState) -> Router {
     return Router::new()
         .nest(&format!("{}/auth", API_PREFIX), auth::router(state.clone()))
         .nest(&format!("{}/tenants", API_PREFIX), tenants::router())
-        .nest(&format!("{}/stores", API_PREFIX), stores::router())
+        .nest(&format!("{}/stores", API_PREFIX), stores::router().merge(catalog::router()))
+        .nest(&format!("{}/tax-rates", API_PREFIX), pricing::tax_rates_router())
         .nest(&format!("{}/customers", API_PREFIX), customers::router())
         .nest(&format!("{}/payments", API_PREFIX), payments::router())
         .nest(&format!("{}/suppliers", API_PREFIX), purchasing::suppliers_router())
