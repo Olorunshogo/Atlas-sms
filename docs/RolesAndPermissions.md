@@ -5,7 +5,9 @@ that defines the schema
 (`apps/atlas-backend/migrations/20260922000005_create_roles_and_grants.sql`),
 the seed data (`...0009_seed_system_roles.sql`,
 `...0020_add_product_permission.sql`, `...0021_grant_product_permission_to_roles.sql`,
-`...0022_seed_platform_admin_role.sql`), and the Rust source under
+`...0022_seed_platform_admin_role.sql`,
+`...20261022000025_add_sales_permissions.sql`,
+`...20261022000026_grant_sales_permissions.sql`), and the Rust source under
 `apps/atlas-backend/src/roles/` and `src/extractors.rs`.
 
 ---
@@ -46,12 +48,32 @@ tenant.manage
 product.manage   (added later - covers products, product types,
                    units, and price rules in one permission rather
                    than one per entity)
+
+Added with the sales, receipts, returns and customer work:
+sale.view            search and read sales beyond your own open shift
+sale.discount        discount above the store's cashier allowance
+sale.price_override  charge a price other than the resolved one
+sale.return          start a return (refunding it may still need approval)
+receipt.reprint      print a receipt again after the original
+customer.view        look customers up (contact details masked)
+customer.manage      register, edit and erase customers
+customer.history     full contact details and purchase history
+payment.manage       confirm, fail or reverse a payment
 ```
 
 Small and coarse-grained on purpose. `product.manage` bundling four
 different resources under one permission is a deliberate choice - split
 it further only when a real case needs "can edit prices but not add
-product types" as a distinct grant, not pre-emptively.
+product types" as a distinct grant, not pre-emptively. The later
+additions each mark a line a real role draws differently: a cashier
+looks customers up and starts returns, but doesn't see purchase history,
+override prices, reprint receipts, or approve their own refunds.
+
+Some checks only change behaviour instead of refusing the request, via
+`roles::service::has_permission`: a quote reports a price override
+without `sale.price_override` as a violation instead of failing, and a
+return started without `sale.refund` waits for approval. Approving a
+return also needs a different person from whoever started it.
 
 ---
 
@@ -107,6 +129,15 @@ It's satisfied when the caller has an `active` grant that is any of:
 ...and the role behind that grant actually has the requested permission
 in its `permissions` array. One SQL query, one code path, used
 identically by `sales`, `stock`, `roles`, and every other module.
+
+Two companions share that query: `has_permission` returns the answer as
+a bool, and `stores_with_permission` returns every store a permission
+reaches (`StoreScope::All` or a list) for list endpoints that span
+stores, such as sales search and customer purchase history.
+
+Customers belong to the tenant, not a store, so their endpoints check
+against the caller's current store from `x-store-id`. Without that
+header a store-scoped grant can't match, and the request is a 403.
 
 ---
 
@@ -209,12 +240,12 @@ lookup):
 
 | Role             | Scope in practice                                                                      | Permissions                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `owner`          | tenant-wide                                                                            | Everything: sales, stock, purchasing, staff, stores, roles, reports, `tenant.manage`, `product.manage`                                             |
+| `owner`          | tenant-wide                                                                            | Everything: sales, stock, purchasing, staff, stores, roles, reports, customers, `tenant.manage`, `product.manage`                                  |
 | `admin`          | tenant-wide                                                                            | Same as `owner` minus `tenant.manage`                                                                                                              |
-| `store_manager`  | usually store-scoped                                                                   | Sales, stock, purchasing, `staff.invite`, `report.view`, `product.manage` - no `staff.remove`, `role.create`/`role.assign`, or store create/update |
-| `cashier`        | store-scoped                                                                           | `sale.create`, `stock.view` only                                                                                                                   |
+| `store_manager`  | usually store-scoped                                                                   | Sales (incl. view, discount, override, return, reprint), payments, customers, stock, purchasing, `staff.invite`, `report.view`, `product.manage` - no `staff.remove`, `role.create`/`role.assign`, or store create/update |
+| `cashier`        | store-scoped                                                                           | `sale.create`, `sale.return`, `stock.view`, `customer.view`, `customer.manage`                                                                     |
 | `stock_clerk`    | store-scoped                                                                           | `stock.view`, `stock.adjust`, `stock.transfer`                                                                                                     |
-| `accountant`     | tenant **or** store-scoped (same role definition, only the grant's `store_id` differs) | `stock.view`, `report.view`                                                                                                                        |
+| `accountant`     | tenant **or** store-scoped (same role definition, only the grant's `store_id` differs) | `stock.view`, `report.view`, `sale.view`, `customer.history`                                                                                       |
 | `platform_admin` | platform                                                                               | Everything `owner` has, plus it's the only role with `scope = 'platform'`                                                                          |
 
 `store_manager`, `cashier`, and `stock_clerk` are typically store-scoped

@@ -85,8 +85,12 @@ CI gets wired when that work happens, not before.
 
 ## What's still open
 
-- POS checkout and the offline sale sync client. The server endpoint
-  `POST /api/v1/sync/sales` exists. No screen calls it yet. Pinia is
+- The POS checkout screen and the offline sale sync client. The backend
+  for FR-15 to FR-19 is built: catalog search, barcode lookup, quote and
+  offline snapshot under `/api/v1/stores/{id}/catalog`, server-priced
+  checkout (`POST /api/v1/sales`, `POST /api/v1/sync/sales`), payments,
+  receipts with per-store gap-free numbering, returns and customers. No
+  screen calls them yet. Pinia is
   already a dependency and unused; the cart (`addItem`, `removeItem`,
   `updateQuantity`, `applyDiscount`, `clearCart`, a running total several
   components read, payment status pending/success/failed, and persistence
@@ -95,5 +99,9 @@ CI gets wired when that work happens, not before.
   it is not what Pinia is for here.
 - Capacitor secure storage for the POS refresh token. It is memory-only today.
 - A screen for custom roles. Invite of a seeded role is built.
-- `price_rules` and `module_toggles` tables have no HTTP API yet.
+- `module_toggles` has no HTTP API yet. Price rules can be created
+  (`POST /api/v1/products/{id}/price-rules`) but not edited or deleted.
+- No payment gateway: a `pending` card or transfer payment is confirmed
+  by a person (`POST /api/v1/payments/{id}/status`), not a webhook.
+  Store credit can be refunded to but not yet spent at checkout.
 - No CI workflow. See item 8.
