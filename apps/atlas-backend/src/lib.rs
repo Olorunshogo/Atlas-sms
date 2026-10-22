@@ -96,3 +96,62 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/reports", API_PREFIX), reports::router())
         .with_state(state);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    /// The source text of `pub fn name()` in a module's `mod.rs`, up to the next `pub fn`.
+    fn router_body(module: &str, name: &str) -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(module).join("mod.rs");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let start = source
+            .find(&format!("pub fn {}(", name))
+            .unwrap_or_else(|| panic!("no {}::{}", module, name));
+        let rest = &source[start + 1..];
+        let end = rest.find("pub fn ").map(|i| i + 1).unwrap_or(rest.len());
+        return source[start..start + end].to_string();
+    }
+
+    /// Every `METHOD /path` the API mounts, read from `api_router` and each module's router function.
+    fn mounted_routes() -> BTreeSet<String> {
+        let lib = include_str!("lib.rs");
+        let start = lib.find("pub fn api_router").unwrap();
+        let body = &lib[start..start + lib[start..].find("#[cfg(test)]").unwrap()];
+        let mut routes = BTreeSet::new();
+        for line in body.lines().filter(|l| l.contains(".nest(")) {
+            let prefix = line.split("\"{}").nth(1).unwrap().split('"').next().unwrap();
+            let calls = line.split(API_PREFIX_ARG).nth(1).unwrap();
+            for call in calls.split(&['(', ')', '.', ' ', ','][..]).filter(|c| c.contains("::")) {
+                let (module, name) = call.split_once("::").unwrap();
+                for route in router_body(module, name).split(".route(").skip(1) {
+                    let path = route.split('"').nth(1).unwrap();
+                    let full = if path == "/" { prefix.to_string() } else { format!("{}{}", prefix, path) };
+                    let handlers = route.split("))").next().unwrap_or(route);
+                    for method in ["get", "post", "patch", "put", "delete"] {
+                        if handlers.contains(&format!("{}(", method)) {
+                            routes.insert(format!("{} {}", method.to_uppercase(), full));
+                        }
+                    }
+                }
+            }
+        }
+        return routes;
+    }
+
+    const API_PREFIX_ARG: &str = "API_PREFIX),";
+
+    /// Fails when a route is mounted but `docs/atlas/api-reference.md` never mentions it as `METHOD /path`.
+    #[test]
+    fn every_route_is_in_the_api_reference() {
+        let reference = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/atlas/api-reference.md"),
+        )
+        .unwrap();
+        let routes = mounted_routes();
+        assert!(routes.len() > 60, "route discovery found only {:?}", routes);
+        let missing: Vec<&String> = routes.iter().filter(|r| !reference.contains(&format!("`{}", r))).collect();
+        assert!(missing.is_empty(), "routes missing from docs/atlas/api-reference.md: {:#?}", missing);
+    }
+}
