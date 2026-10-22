@@ -1,6 +1,6 @@
 /*!
- * The per-store sales configuration: tax treatment, rounding, discount and
- * stock policy. Read by anyone selling at the store, changed only with
+ * The per-store sales configuration: tax treatment, rounding, discount,
+ * stock and pay-later policy, and what the receipt prints about the branch. Read by anyone selling at the store, changed only with
  * `store.update` at that store.
  */
 use axum::extract::Path;
@@ -15,7 +15,8 @@ use crate::response::ApiEnvelope;
 use crate::roles;
 
 const SETTINGS_COLUMNS: &str = "id, currency, timezone, prices_include_tax, default_tax_rate_id,
-     cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later";
+     cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later,
+     address, phone, receipt_prefix, receipt_header, receipt_footer";
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct StoreSettings {
@@ -29,6 +30,11 @@ pub struct StoreSettings {
     pub allow_negative_stock: bool,
     /// Lets a sale with a named customer complete before it's fully paid.
     pub allow_pay_later: bool,
+    pub address: Option<String>,
+    pub phone: Option<String>,
+    pub receipt_prefix: Option<String>,
+    pub receipt_header: Option<String>,
+    pub receipt_footer: Option<String>,
 }
 
 fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -49,6 +55,11 @@ pub struct UpdateStoreSettingsRequest {
     pub max_cashier_discount_basis_points: Option<i32>,
     pub allow_negative_stock: Option<bool>,
     pub allow_pay_later: Option<bool>,
+    pub address: Option<String>,
+    pub phone: Option<String>,
+    pub receipt_prefix: Option<String>,
+    pub receipt_header: Option<String>,
+    pub receipt_footer: Option<String>,
 }
 
 /// `GET /api/v1/stores/:id/settings`. Requires `sale.create` or `store.update` at the store.
@@ -86,6 +97,11 @@ pub async fn update_settings(
              max_cashier_discount_basis_points = COALESCE($6, max_cashier_discount_basis_points),
              allow_negative_stock = COALESCE($7, allow_negative_stock),
              allow_pay_later = COALESCE($8, allow_pay_later),
+             address = COALESCE($9, address),
+             phone = COALESCE($10, phone),
+             receipt_prefix = COALESCE($11, receipt_prefix),
+             receipt_header = COALESCE($12, receipt_header),
+             receipt_footer = COALESCE($13, receipt_footer),
              updated_at = now()
          WHERE id = $1",
     )
@@ -97,6 +113,11 @@ pub async fn update_settings(
     .bind(body.max_cashier_discount_basis_points)
     .bind(body.allow_negative_stock)
     .bind(body.allow_pay_later)
+    .bind(&body.address)
+    .bind(&body.phone)
+    .bind(body.receipt_prefix.as_deref().map(|p| p.trim().to_uppercase()))
+    .bind(&body.receipt_header)
+    .bind(&body.receipt_footer)
     .execute(&mut *tx)
     .await?;
 
