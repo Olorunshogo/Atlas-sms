@@ -82,3 +82,16 @@ pub struct RefundRequestedData {
 pub struct ConfirmRefundRequest {
     pub confirmation_token: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ResolvePaymentRequest {
+    /// `succeeded` | `failed`.
+    pub status: crate::sales::settlement::PaymentOutcome,
+    pub reference: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReversePaymentRequest {
+    pub reason: String,
+}

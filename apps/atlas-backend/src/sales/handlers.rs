@@ -9,11 +9,14 @@ use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
 use crate::roles;
 
+use crate::payments::models::Payment;
+
 use super::checkout::{self, CheckoutMode};
 use super::models::{
-    CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, Sale, SaleDetail, SaleLine, Shift, VoidSaleRequest,
+    ClosedShift, CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, PaymentInput, Sale, SaleDetail, SaleLine, Shift,
+    VoidSaleRequest,
 };
-use super::service;
+use super::{service, settlement};
 
 /**
  * `POST /api/v1/shifts`.
@@ -50,13 +53,13 @@ pub async fn open_shift(
 
 /**
  * `POST /api/v1/shifts/:id/close`.
- * Requires `sale.create` at the shift's own store - the same gate as opening it.
+ * Requires `sale.create` at the shift's own store - the same gate as opening it. The response carries the drawer reconciliation: expected cash (float plus cash taken, less cash refunded) against the counted amount.
  */
 pub async fn close_shift(
     Path(shift_id): Path<Uuid>,
     mut tx: TenantTx,
     Json(body): Json<CloseShiftRequest>,
-) -> Result<Json<ApiEnvelope<Shift>>, ApiError> {
+) -> Result<Json<ApiEnvelope<ClosedShift>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
     let store_id = service::shift_store_id(&mut tx, shift_id).await?;
@@ -72,8 +75,9 @@ pub async fn close_shift(
         serde_json::to_value(&shift).ok(),
     )
     .await?;
+    let cash = crate::reports::service::shift_cash_summary(&mut tx, shift.id).await?;
     tx.commit().await?;
-    return Ok(Json(ApiEnvelope::ok("Shift closed.", shift)));
+    return Ok(Json(ApiEnvelope::ok("Shift closed.", ClosedShift { shift, cash })));
 }
 
 #[derive(Deserialize)]
@@ -156,4 +160,23 @@ pub async fn list_sale_lines(
     let lines = service::list_sale_lines(&mut tx, sale_id).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Sale lines fetched.", lines)));
+}
+
+/**
+ * `POST /api/v1/sales/:id/payments`.
+ * Requires `sale.create` at the sale's store. Pays down a sale still awaiting payment or a pay-later balance; a payment beyond what's owed is `PAYMENT_OVERPAID`. Once the sale is covered it completes and its stock is taken.
+ */
+pub async fn add_payment(
+    Path(sale_id): Path<Uuid>,
+    mut tx: TenantTx,
+    Json(body): Json<PaymentInput>,
+) -> Result<Json<ApiEnvelope<Payment>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = crate::payments::service::sale_store_id(&mut tx, sale_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.create").await?;
+    let payment = settlement::add_payment(&mut tx, tenant_id, sale_id, user_id, &body).await?;
+    audit::record(&mut tx, tenant_id, user_id, "payment", payment.id, "payment.record", serde_json::to_value(&payment).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Payment recorded.", payment)));
 }

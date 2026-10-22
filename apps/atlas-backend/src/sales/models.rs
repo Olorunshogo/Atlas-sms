@@ -33,6 +33,14 @@ pub struct CloseShiftRequest {
     pub closing_cash_amount_minor: i64,
 }
 
+/// A closed shift with its drawer reconciliation: expected cash against what was counted.
+#[derive(Debug, Serialize)]
+pub struct ClosedShift {
+    #[serde(flatten)]
+    pub shift: Shift,
+    pub cash: crate::reports::models::ShiftCashSummary,
+}
+
 // === Checkout input
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

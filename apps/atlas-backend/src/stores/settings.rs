@@ -15,7 +15,7 @@ use crate::response::ApiEnvelope;
 use crate::roles;
 
 const SETTINGS_COLUMNS: &str = "id, currency, timezone, prices_include_tax, default_tax_rate_id,
-     cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock";
+     cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later";
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct StoreSettings {
@@ -27,6 +27,8 @@ pub struct StoreSettings {
     pub cash_rounding_increment_minor: i64,
     pub max_cashier_discount_basis_points: i32,
     pub allow_negative_stock: bool,
+    /// Lets a sale with a named customer complete before it's fully paid.
+    pub allow_pay_later: bool,
 }
 
 fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -46,6 +48,7 @@ pub struct UpdateStoreSettingsRequest {
     pub cash_rounding_increment_minor: Option<i64>,
     pub max_cashier_discount_basis_points: Option<i32>,
     pub allow_negative_stock: Option<bool>,
+    pub allow_pay_later: Option<bool>,
 }
 
 /// `GET /api/v1/stores/:id/settings`. Requires `sale.create` or `store.update` at the store.
@@ -82,6 +85,7 @@ pub async fn update_settings(
              cash_rounding_increment_minor = COALESCE($5, cash_rounding_increment_minor),
              max_cashier_discount_basis_points = COALESCE($6, max_cashier_discount_basis_points),
              allow_negative_stock = COALESCE($7, allow_negative_stock),
+             allow_pay_later = COALESCE($8, allow_pay_later),
              updated_at = now()
          WHERE id = $1",
     )
@@ -92,6 +96,7 @@ pub async fn update_settings(
     .bind(body.cash_rounding_increment_minor)
     .bind(body.max_cashier_discount_basis_points)
     .bind(body.allow_negative_stock)
+    .bind(body.allow_pay_later)
     .execute(&mut *tx)
     .await?;
 

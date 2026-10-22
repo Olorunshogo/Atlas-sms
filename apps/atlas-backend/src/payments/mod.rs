@@ -10,6 +10,8 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     return Router::new()
         .route("/", get(handlers::list_payments))
+        .route("/{id}/status", post(handlers::resolve_payment))
+        .route("/{id}/reverse", post(handlers::reverse_payment))
         .route("/{id}/refund", post(handlers::request_refund))
         .route("/refunds/{id}/confirm", post(handlers::confirm_refund));
 }

@@ -2,6 +2,7 @@ pub mod checkout;
 mod handlers;
 pub mod models;
 pub mod service;
+pub mod settlement;
 
 pub use models::{CreateSaleRequest, SaleDetail};
 
@@ -20,5 +21,6 @@ pub fn router() -> Router<AppState> {
     return Router::new()
         .route("/", get(handlers::list_sales).post(handlers::create_sale))
         .route("/{id}/lines", get(handlers::list_sale_lines))
-        .route("/{id}/void", post(handlers::void_sale));
+        .route("/{id}/void", post(handlers::void_sale))
+        .route("/{id}/payments", post(handlers::add_payment));
 }

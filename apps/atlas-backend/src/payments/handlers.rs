@@ -8,9 +8,12 @@ use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
 use crate::roles;
 
+use crate::sales::settlement;
+
 use super::models::{
     ConfirmRefundRequest, CreatePaymentMethodRequest, ListPaymentsQuery, Payment, PaymentMethod, Refund,
-    RefundRequestedData, RequestRefundRequest, UpdatePaymentMethodRequest,
+    RefundRequestedData, RequestRefundRequest, ResolvePaymentRequest, ReversePaymentRequest,
+    UpdatePaymentMethodRequest,
 };
 use super::service;
 
@@ -29,6 +32,53 @@ pub async fn list_payments(
     let payments = service::list_payments_for_sale(&mut tx, query.sale_id).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Payments fetched.", payments)));
+}
+
+/**
+ * `POST /api/v1/payments/:id/status`.
+ * Requires `payment.manage` at the payment's store. Confirms or fails a pending payment; confirming the last one a sale was waiting on completes the sale.
+ */
+pub async fn resolve_payment(
+    Path(payment_id): Path<Uuid>,
+    mut tx: TenantTx,
+    Json(body): Json<ResolvePaymentRequest>,
+) -> Result<Json<ApiEnvelope<Payment>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::payment_store_id(&mut tx, payment_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "payment.manage").await?;
+    let payment = settlement::resolve_pending(
+        &mut tx,
+        tenant_id,
+        payment_id,
+        user_id,
+        body.status,
+        body.reference.as_deref(),
+        body.reason.as_deref(),
+    )
+    .await?;
+    audit::record(&mut tx, tenant_id, user_id, "payment", payment.id, "payment.resolve", serde_json::to_value(&payment).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Payment updated.", payment)));
+}
+
+/**
+ * `POST /api/v1/payments/:id/reverse`.
+ * Requires `payment.manage` at the payment's store - a reversal takes money off a sale's paid total, so it's a supervisor action.
+ */
+pub async fn reverse_payment(
+    Path(payment_id): Path<Uuid>,
+    mut tx: TenantTx,
+    Json(body): Json<ReversePaymentRequest>,
+) -> Result<Json<ApiEnvelope<Payment>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::payment_store_id(&mut tx, payment_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "payment.manage").await?;
+    let payment = settlement::reverse(&mut tx, tenant_id, payment_id, user_id, &body.reason).await?;
+    audit::record(&mut tx, tenant_id, user_id, "payment", payment.id, "payment.reverse", serde_json::to_value(&payment).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Payment reversed.", payment)));
 }
 
 // === Payment methods
