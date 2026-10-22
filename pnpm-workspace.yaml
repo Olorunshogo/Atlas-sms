@@ -41,6 +41,7 @@ minimumReleaseAgeExclude:
 allowBuilds:
   '@parcel/watcher': false
   '@swc/core': false
+  core-js: true
   esbuild: false
   nx: false
   sharp: false

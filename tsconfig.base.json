@@ -2,7 +2,7 @@
   "compilerOptions": {
     "composite": true,
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "declarationMap": true,
     "emitDeclarationOnly": true,
     "importHelpers": true,
@@ -19,9 +19,14 @@
     "strict": true,
     "target": "es2022",
     "paths": {
+      "@atlas/api": ["libs/shared/api/src/index.ts"],
       "@atlas/theme": ["libs/shared/theme/src/index.ts"],
       "@atlas/validation": ["libs/shared/validation/src/index.ts"],
       "@atlas/composables": ["libs/shared/composables/src/index.ts"],
+      "@atlas/utils": ["libs/shared/utils/src/index.ts"],
+      "@atlas/types": ["libs/shared/types/src/index.ts"],
+      "@atlas/data": ["libs/shared/data/src/index.ts"],
+      "@atlas/ui": ["libs/shared/ui/src/index.ts"],
       "@atlas/ui-core": ["packages/atlas-ui/core/src/index.ts"],
       "@atlas/ui-app": ["packages/atlas-ui/app/src/index.ts"],
       "@atlas/ui-web": ["packages/atlas-ui/web/src/index.ts"]

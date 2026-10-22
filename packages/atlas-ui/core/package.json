@@ -1,0 +1,48 @@
+{
+  "name": "@atlas/ui-core",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "dist/**"
+  ],
+  "scripts": {
+    "build": "tsup && vue-tsc -p tsconfig.lib.json --emitDeclarationOnly",
+    "watch": "tsup --watch",
+    "clean": "rm -rf dist",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.38"
+  },
+  "dependencies": {
+    "@atlas/theme": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-vue-next": "^1.0.0",
+    "reka-ui": "^2.10.1",
+    "tailwind-merge": "^3.6.0",
+    "vue-input-otp": "^0.3.2"
+  },
+  "devDependencies": {
+    "@storybook/vue3-vite": "^10.4.6",
+    "@tailwindcss/vite": "^4.1.17",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.6",
+    "storybook": "^10.4.6",
+    "tailwindcss": "^4.1.17",
+    "unplugin-vue": "^7.2.0",
+    "vite": "^7.0.0",
+    "vue-tsc": "3.3.6"
+  },
+  "nx": {
+    "tags": [
+      "type:ui-core"
+    ]
+  }
+}

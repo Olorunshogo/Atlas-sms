@@ -12,6 +12,9 @@
     "./tailwind-config": "./src/lib/tailwind.config.js",
     "./tailwind-preset": "./src/lib/tailwind.preset.js"
   },
+  "scripts": {
+    "build": "tsc -p tsconfig.lib.json"
+  },
   "nx": {
     "tags": [
       "type:theme"

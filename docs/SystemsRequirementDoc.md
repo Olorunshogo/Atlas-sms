@@ -2,23 +2,23 @@
 
 A **Store Management System (SMS)** is a software system used to manage a storeâ€™s products, inventory, sales, purchases, customers, suppliers, and staff.
 
- ## Main requirements of a Store Management System
+## Main requirements of a Store Management System
 
- ### 1\. User Management
+### 1\. User Management
 
- The system should allow:
+The system should allow:
 
- - User registration and login
+- User registration and login
 - Different roles such as **Administrator, Manager, Cashier, and Storekeeper**
 - Role-based permissions
 - Password management
 - User activity/audit logs
 
- ### 2\. Product Management
+### 2\. Product Management
 
- The system should allow staff to:
+The system should allow staff to:
 
- - Add, edit, and delete products
+- Add, edit, and delete products
 - Assign product categories
 - Record product codes/SKUs
 - Record prices and costs
@@ -27,11 +27,11 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - Search and filter products
 - Support product images or descriptions where necessary
 
- ### 3\. Inventory/Stock Management
+### 3\. Inventory/Stock Management
 
- The system should:
+The system should:
 
- - Record incoming stock
+- Record incoming stock
 - Record outgoing stock
 - Automatically update stock after sales and purchases
 - Track damaged, expired, or returned goods
@@ -40,11 +40,11 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - Maintain stock movement/history
 - Support stock adjustments and physical stock counts
 
- ### 4\. Sales Management
+### 4\. Sales Management
 
- The system should support:
+The system should support:
 
- - Creating sales transactions
+- Creating sales transactions
 - Generating receipts/invoices
 - Calculating totals, discounts, and taxes where applicable
 - Multiple payment methods
@@ -52,43 +52,43 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - Updating inventory automatically after a sale
 - Viewing sales history
 
- ### 5\. Purchasing Management
+### 5\. Purchasing Management
 
- The system should allow:
+The system should allow:
 
- - Creating purchase orders
+- Creating purchase orders
 - Recording suppliers
 - Recording goods received
 - Tracking purchase costs
 - Updating inventory when purchases are received
 - Managing cancelled or returned purchases
 
- ### 6\. Supplier Management
+### 6\. Supplier Management
 
- The system should store:
+The system should store:
 
- - Supplier name and contact details
+- Supplier name and contact details
 - Products supplied
 - Purchase history
 - Outstanding balances, if credit purchases are supported
 - Supplier transaction history
 
- ### 7\. Customer Management
+### 7\. Customer Management
 
- Depending on the type of store, the system may include:
+Depending on the type of store, the system may include:
 
- - Customer registration
+- Customer registration
 - Customer contact information
 - Purchase history
 - Loyalty points
 - Credit/debt tracking
 - Customer returns
 
- ### 8\. Reporting
+### 8\. Reporting
 
- The system should generate reports such as:
+The system should generate reports such as:
 
- - Daily/weekly/monthly sales
+- Daily/weekly/monthly sales
 - Profit and revenue reports
 - Inventory reports
 - Low-stock reports
@@ -98,11 +98,11 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - Supplier reports
 - Stock movement reports
 
- ### 9\. Dashboard
+### 9\. Dashboard
 
- A dashboard can provide an overview of:
+A dashboard can provide an overview of:
 
- - Total sales
+- Total sales
 - Number of transactions
 - Current inventory
 - Low-stock products
@@ -110,9 +110,9 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - Recent sales
 - Revenue/profit summaries
 
- ### 10\. Security
+### 10\. Security
 
- The system should provide:
+The system should provide:
 
 - Authentication and authorization
 - Password protection
@@ -122,11 +122,11 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - Audit trails
 - Protection against unauthorized modification or deletion
 
- ## Non-functional requirements
+## Non-functional requirements
 
- The system should also have qualities such as:
+The system should also have qualities such as:
 
- - **Usability:** Easy for store employees to learn and use.
+- **Usability:** Easy for store employees to learn and use.
 - **Performance:** Sales and inventory transactions should be processed quickly.
 - **Reliability:** The system should minimize data loss and errors.
 - **Scalability:** It should be possible to add more products, users, or branches.
@@ -135,9 +135,9 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - **Security:** Store and customer information should be protected.
 - **Backup and recovery:** Data should be recoverable after failures.
 
- ## Basic database requirements
+## Basic database requirements
 
- A typical system might have tables/entities such as:
+A typical system might have tables/entities such as:
 
 - `Users`
 - `Roles`
@@ -154,8 +154,8 @@ A **Store Management System (SMS)** is a software system used to manage a storeâ
 - `Returns`
 - `StockMovements`
 
- ### Example workflow
+### Example workflow
 
- **Purchase stock â†’ Receive goods â†’ Inventory increases â†’ Customer buys product â†’ Sale recorded â†’ Inventory decreases â†’ Receipt generated â†’ Sales/reporting data updated.**
+**Purchase stock â†’ Receive goods â†’ Inventory increases â†’ Customer buys product â†’ Sale recorded â†’ Inventory decreases â†’ Receipt generated â†’ Sales/reporting data updated.**
 
- If you're writing this for a **school/college project**, these requirements can be turned into a formal **System Requirements Specification (SRS)** containing functional requirements, non-functional requirements, use cases, database requirements, and system constraints.
+If you're writing this for a **school/college project**, these requirements can be turned into a formal **System Requirements Specification (SRS)** containing functional requirements, non-functional requirements, use cases, database requirements, and system constraints.

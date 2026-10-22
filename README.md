@@ -9,35 +9,26 @@ Nx-powered monorepo for Atlas, a multi-store management platform: one system tha
 ```
 .
 ├── apps/
-│   ├── atlas-backend/          # Rust/Axum/sqlx API - tenants, stores, roles, auth
-│   ├── atlas-marketing/        # Nuxt app - public pages + owner/manager dashboard
-│   ├── atlas-pos/              # Ionic/Capacitor - offline-first point of sale
-│   │
-│   ├── atlas-backend/      # Existing Rust/Axum API, kept as a pattern
-│   ├── atlas-web/          # reference during Atlas's build-out - see
-│   ├── atlas-mobile/       # "Why atlas-* is still here" below
-│   └── landing-page/
+│   ├── atlas-backend/          # Rust/Axum/sqlx API
+│   ├── atlas-web/        # Nuxt - public site, auth, owner/manager dashboard
+│   └── atlas-pos/              # Ionic/Capacitor - till login and session home
 │
-├── packages/
-│   ├── atlas-ui/
-│   │   ├── core/                # @atlas/ui-core - shared Vue primitives, Storybook
-│   │   ├── web/                 # @atlas/ui-web - browser-only additions
-│   │   └── app/                 # @atlas/ui-app - Ionic/Capacitor additions
-│   └── atlas-ui/            # existing component packages (see below)
+├── packages/atlas-ui/
+│   ├── core/                   # @atlas/ui-core
+│   ├── web/                    # @atlas/ui-web
+│   └── app/                    # @atlas/ui-app
 │
 ├── libs/shared/
-│   ├── theme/                   # @atlastheme - Tailwind design tokens
-│   ├── composables/             # @atlascomposables - framework-agnostic helpers
-│   └── validation/               # @atlasvalidation
+│   ├── theme/                  # @atlas/theme
+│   ├── composables/            # @atlas/composables
+│   └── validation/             # @atlas/validation
 │
 └── docs/
-    ├── Atlas/                   # Product/investor/tech PRDs for the store platform
-    ├── atlas/CONTEXT.md         # Atlas's own locked architecture decisions
-    ├── v2.md                    # Atlas features deliberately deferred
-    └── ...
+    ├── atlas/                  # architecture, auth flow, product notes
+    └── v2.md                   # scope deferred past v1
 ```
 
-The `libs/shared/*` packages keep the `@atlas*` npm scope even though they're consumed by Atlas apps too - they're genuinely framework/product-agnostic (design tokens, small utilities), and renaming an npm scope with no functional reason to is exactly the kind of disruptive change this repo avoids. See `docs/atlas/CONTEXT.md` for the full reasoning.
+`libs/shared/*` is shared by the web app and the POS. See `docs/atlas/CONTEXT.md`.
 
 ---
 
@@ -46,7 +37,7 @@ The `libs/shared/*` packages keep the `@atlas*` npm scope even though they're co
 New feature work targets the three apps in this repo:
 
 - `atlas-backend` is the API.
-- `atlas-marketing` is the public site and the owner/manager dashboard.
+- `atlas-web` is the public site and the owner/manager dashboard.
 - `atlas-pos` is the point-of-sale client.
 
 Tenant isolation is a `TenantTx` Axum extractor plus Postgres row-level security. Auth is JWT plus a rotating refresh token. The UI packages are Vue libraries built with `tsup` and Storybook.
@@ -82,18 +73,23 @@ pnpm run prepare   # git hooks
 ### Running Atlas
 
 ```bash
-# Backend - its own Postgres server, isolated from atlas-backend's
-nx docker atlas-backend    # starts atlas-backend's own Postgres container
-nx dev atlas-backend       # runs migrations, then the API
+# Postgres on host port 5434, then the API
+docker compose -f docker-compose.atlas.yml up -d postgres
+# apply migrations with ATLAS_DATABASE_ADMIN_URL, then:
+nx dev atlas-backend
 
-# Web dashboard
-nx dev atlas-marketing
+# Marketing site and dashboard (Nitro proxy to the API)
+nx dev atlas-web
 
-# POS (Ionic/Capacitor)
+# POS
 nx dev atlas-pos
 ```
 
-Copy `.env.example` to `.env` first - the `ATLAS_*` variables are documented inline there, including why they're prefixed (this repo's one root `.env` is shared with `atlas-backend`, which uses unprefixed names).
+Copy `.env.example` to `.env` first. The API reads `ATLAS_DATABASE_URL`,
+`ATLAS_JWT_SECRET`, and `ATLAS_PORT`. `atlas-web` reads `ATLAS_API_BASE`.
+Connect as `atlas_api`, never the superuser. If a Postgres volume was created
+before that role existed, create `atlas_api` or recreate the volume. Init SQL
+runs only on a new volume.
 
 ---
 
@@ -122,8 +118,11 @@ Full reasoning: [`docs/atlas/CONTEXT.md`](docs/atlas/CONTEXT.md).
 
 ## Documentation
 
-- [`docs/Atlas/README.md`](docs/Atlas/README.md) - product design: store types, the product/attribute model, units of measure, pricing rules
-- [`docs/atlas/CONTEXT.md`](docs/atlas/CONTEXT.md) - Atlas's locked architecture decisions
+- [`docs/atlas/README.md`](docs/atlas/README.md) - product design: store types, the product model, units, pricing rules
+- [`docs/atlas/CONTEXT.md`](docs/atlas/CONTEXT.md) - locked architecture decisions and current gaps
+- [`docs/atlas/auth-flow.md`](docs/atlas/auth-flow.md) - auth API, proxy, marketing screens, POS session
+- [`docs/SystemDesign.md`](docs/SystemDesign.md) - how the running system is put together
+- [`docs/RolesAndPermissions.md`](docs/RolesAndPermissions.md) - roles, grants, and what they can do
 - [`docs/v2.md`](docs/v2.md) - scope deliberately deferred past v1
 
 ---

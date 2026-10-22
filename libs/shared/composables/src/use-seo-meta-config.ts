@@ -1,83 +1,64 @@
 import { useHead, useRuntimeConfig, useSeoMeta } from 'nuxt/app';
-
-// === Types
+import { buildPageSeo } from '@atlas/utils';
 
 export interface SeoMetaPageConfig {
   title: string;
-  titleTemplate?: string;
   description: string;
-  ogTitle?: string;
-  ogDescription?: string;
-  ogUrl: string;
-  twitterTitle?: string;
-  twitterDescription?: string;
-  keywords?: string[];
+  path: string;
+  keywords?: readonly string[];
+  noIndex?: boolean;
 }
 
-/**
- * Site-wide defaults every Atlas Nuxt app supplies via its own
- * `nuxt.config.ts` (`runtimeConfig.public.seo`) - never hardcoded here,
- * since `atlas-web` and `landing-page` are different domains/products
- * and shouldn't share a site URL, OG image, or Twitter handle.
- */
-export interface SeoRuntimeConfig {
+interface SeoRuntimeConfig {
   siteUrl: string;
-  siteName: string;
-  defaultOgImage: string;
-  ogImageWidth?: number;
-  ogImageHeight?: number;
-  ogImageAlt: string;
-  twitterHandle?: string;
-  baseKeywords?: string[];
 }
 
-// === Composable
-
 /**
- * One SEO composable for every Atlas Nuxt app. Combines `useHead`
- * (canonical link, favicon, lang) and `useSeoMeta` (OG/Twitter tags) so a
- * page only has to supply what's page-specific. Site-wide defaults come
- * from `useRuntimeConfig().public.seo`, set once per app.
+ * Page SEO for Atlas Nuxt apps. Title, description, extra keywords, and
+ * noIndex are per page. Author, base keywords, and the social-card shape
+ * come from the shared public constants. noIndex pages skip the Open Graph
+ * and Twitter tags.
  */
 export function useSeoMetaConfig(page: SeoMetaPageConfig): void {
-  const { public: publicConfig } = useRuntimeConfig();
-  const seo = publicConfig.seo as SeoRuntimeConfig;
-
-  const allKeywords = [
-    ...(seo.baseKeywords ?? []),
-    ...(page.keywords ?? []),
-  ].join(', ');
-  const absoluteOgImage = `${seo.siteUrl}${seo.defaultOgImage}`;
+  const seo = useRuntimeConfig().public.seo as SeoRuntimeConfig;
+  const meta = buildPageSeo({
+    title: page.title,
+    description: page.description,
+    path: page.path,
+    keywords: page.keywords,
+    noIndex: page.noIndex,
+    siteUrl: seo.siteUrl,
+  });
 
   useHead({
-    title: page.title,
-    titleTemplate: page.titleTemplate ?? `%s - ${seo.siteName}`,
+    title: meta.title,
+    titleTemplate: '%s',
     htmlAttrs: { lang: 'en' },
+    meta: [{ name: 'author', content: meta.author }],
     link: [
-      { rel: 'canonical', href: page.ogUrl },
       { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+      ...(meta.canonical
+        ? [{ rel: 'canonical' as const, href: meta.canonical }]
+        : []),
     ],
   });
 
   useSeoMeta({
-    title: page.title,
-    titleTemplate: page.titleTemplate ?? `%s - ${seo.siteName}`,
-    description: page.description,
-    ogTitle: page.ogTitle ?? page.title,
-    ogDescription: page.ogDescription ?? page.description,
-    ogImage: absoluteOgImage,
-    ogImageWidth: seo.ogImageWidth ?? 1200,
-    ogImageHeight: seo.ogImageHeight ?? 630,
-    ogImageAlt: seo.ogImageAlt,
-    ogType: 'website',
-    ogUrl: page.ogUrl,
-    ogSiteName: seo.siteName,
-    twitterCard: 'summary_large_image',
-    twitterTitle: page.twitterTitle ?? page.title,
-    twitterDescription: page.twitterDescription ?? page.description,
-    twitterImage: absoluteOgImage,
-    ...(seo.twitterHandle ? { twitterSite: seo.twitterHandle } : {}),
-    keywords: allKeywords,
-    robots: 'index, follow',
+    description: meta.description,
+    robots: meta.robots,
+    ...(meta.canonical
+      ? {
+          keywords: meta.keywords,
+          ogTitle: meta.title,
+          ogDescription: meta.description,
+          ogImageAlt: meta.imageAlt,
+          ogType: 'website' as const,
+          ogUrl: meta.canonical,
+          ogSiteName: meta.siteName,
+          twitterCard: 'summary_large_image' as const,
+          twitterTitle: meta.title,
+          twitterDescription: meta.description,
+        }
+      : {}),
   });
 }

@@ -1,0 +1,35 @@
+{
+  "name": "@atlas/ui-web",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "dist/**"
+  ],
+  "scripts": {
+    "build": "tsup && vue-tsc -p tsconfig.lib.json --emitDeclarationOnly",
+    "watch": "tsup --watch",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.38"
+  },
+  "dependencies": {
+    "@atlas/ui-core": "workspace:*",
+    "lucide-vue-next": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "unplugin-vue": "^7.2.0",
+    "vue-tsc": "3.3.6"
+  },
+  "nx": {
+    "tags": [
+      "type:ui-platform"
+    ]
+  }
+}

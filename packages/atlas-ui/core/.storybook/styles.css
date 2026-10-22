@@ -1,0 +1,5 @@
+@import '@atlas/theme/style';
+
+@source '../src';
+@source '../../web/src';
+@source '../../app/src';

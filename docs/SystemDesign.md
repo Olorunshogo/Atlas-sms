@@ -43,23 +43,23 @@ column on the product row.
 
 ```mermaid
 flowchart TB
-    subgraph Clients
-        Web["atlas-marketing (Nuxt)\nmarketing site + owner/manager dashboard"]
-        POS["atlas-pos (Ionic/Capacitor)\nPOS terminal - screens not yet built"]
-    end
+  subgraph Clients
+      Web["atlas-web (Nuxt)\nmarketing site + owner/manager dashboard"]
+      POS["atlas-pos (Ionic/Capacitor)\nlogin + session home"]
+  end
 
-    subgraph Backend["apps/atlas-backend (Rust / Axum)"]
-        API["HTTP API\nauth, tenants, stores, roles, products, stock, sales, sync"]
-        TenantTx["TenantTx extractor\nJWT -> tenant/store scoped tx"]
-        AdminTx["AdminTx extractor\nunscoped, narrow bypass"]
-    end
+  subgraph Backend["apps/atlas-backend (Rust / Axum)"]
+      API["HTTP API\nauth, tenants, stores, roles, products, stock, sales, sync"]
+      TenantTx["TenantTx extractor\nJWT -> tenant/store scoped tx"]
+      AdminTx["AdminTx extractor\nunscoped, narrow bypass"]
+  end
 
-    DB[("Postgres 16\natlas schema, FORCE RLS\nport 5434, own container")]
+  DB[("Postgres 16\natlas schema, FORCE RLS\nport 5434, own container")]
 
-    Web -- "cookie auth, Nitro proxy" --> API
-    POS -. "not wired yet -\nplanned X-Client-Type: app" .-> API
-    API --> TenantTx --> DB
-    API --> AdminTx --> DB
+  Web -- "cookie auth, Nitro proxy" --> API
+  POS -- "X-Client-Type: app\ntokens in the body" --> API
+  API --> TenantTx --> DB
+  API --> AdminTx --> DB
 ```
 
 Atlas runs on its own Postgres server (`docker-compose.atlas.yml`, port
@@ -72,17 +72,17 @@ an incident anywhere else has no path to this data.
 
 ## 3. Tech stack
 
-| Layer | Choice | Notes |
-| --- | --- | --- |
-| Backend | Rust, Axum, sqlx (Postgres, no ORM) | Compiles; one integration test (`tests/health_check.rs`) |
-| Database | PostgreSQL 16, row-level security | `atlas` schema, `atlas_api` app role (never the superuser) |
-| Auth | JWT (access) + opaque refresh tokens, Argon2 password hashes | See section 6 |
-| Web frontend | Nuxt 4 (Vue 3), SSR, Nitro proxy | `apps/atlas-marketing` |
-| POS client | Vue 3 + Ionic + Capacitor | `apps/atlas-pos`, scaffold only |
-| Shared UI | `@atlas/ui-{core,web,app}` (tsup, Storybook) | Component library, three-package split |
-| Shared libs | `@atlas/{theme,composables,validation}` | Tailwind tokens, framework-agnostic helpers, zod schemas |
-| Monorepo tooling | Nx, pnpm workspaces | `@nx/enforce-module-boundaries` gates package placement |
-| CI | None yet | No `.github/workflows/` in the repo for either product |
+| Layer            | Choice                                                       | Notes                                                             |
+| ---------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Backend          | Rust, Axum, sqlx (Postgres, no ORM)                          | Integration tests in `tests/`: health, auth flow, roles, commerce |
+| Database         | PostgreSQL 16, row-level security                            | `atlas` schema, `atlas_api` app role (never the superuser)        |
+| Auth             | JWT (access) + opaque refresh tokens, Argon2 password hashes | See section 6                                                     |
+| Web frontend     | Nuxt 4 (Vue 3), SSR, Nitro proxy                             | `apps/atlas-web`                                                  |
+| POS client       | Vue 3 + Ionic + Capacitor                                    | `apps/atlas-pos`, login and session home. Checkout not built      |
+| Shared UI        | `@atlas/ui-{core,web,app}` (tsup, Storybook)                 | Component library, three-package split                            |
+| Shared libs      | `@atlas/{theme,composables,validation}`                      | Tailwind tokens, framework-agnostic helpers, zod schemas          |
+| Monorepo tooling | Nx, pnpm workspaces                                          | `@nx/enforce-module-boundaries` gates package placement           |
+| CI               | None yet                                                     | No `.github/workflows/` in the repo                               |
 
 The original product brief in `docs/atlas/README.md` proposed ASP.NET
 Core + EF Core + Dapper. That was not what got built - the team reused an
@@ -134,31 +134,30 @@ public store slug.
 
 ## 5. Data model
 
-23 migrations, in build order:
+24 migrations, in build order:
 
-| Area | Migrations | Rust module |
-| --- | --- | --- |
-| Core schema, users | `0001`-`0002` | - |
-| Tenants, stores | `0003`-`0004` | `tenants/`, `stores/` |
-| Roles, grants, RLS | `0005`-`0006` | `roles/` |
-| Email OTP, refresh tokens, seeded roles | `0007`-`0009` | `auth/` |
-| Product types, units, products | `0010`-`0012` | `products/` |
-| Stock | `0013` | `stock/` |
-| Module toggles | `0014` | none yet |
-| Price rules | `0015` | none yet |
-| Sales | `0016` | `sales/`, `sync/` |
-| Purchasing | `0017` | none yet |
-| Billing | `0018` | none yet |
-| Audit events | `0019` | none yet |
-| Product permission additions | `0020`-`0021` | `roles/` |
-| Platform admin role | `0022` | - |
-| Invites | `0023` | `roles/`, `auth/` (invite + accept endpoints, see section 6) |
+| Area                                    | Migrations    | Rust module                                                              |
+| --------------------------------------- | ------------- | ------------------------------------------------------------------------ |
+| Core schema, users                      | `0001`-`0002` | -                                                                        |
+| Tenants, stores                         | `0003`-`0004` | `tenants/`, `stores/`                                                    |
+| Roles, grants, RLS                      | `0005`-`0006` | `roles/`                                                                 |
+| Email OTP, refresh tokens, seeded roles | `0007`-`0009` | `auth/`                                                                  |
+| Product types, units, products          | `0010`-`0012` | `products/`                                                              |
+| Stock                                   | `0013`        | `stock/`                                                                 |
+| Module toggles                          | `0014`        | none yet                                                                 |
+| Price rules                             | `0015`        | none yet                                                                 |
+| Sales                                   | `0016`        | `sales/`, `sync/`                                                        |
+| Purchasing                              | `0017`        | `purchasing/`                                                            |
+| Billing                                 | `0018`        | `payments/` for payments and refunds. Subscriptions have no HTTP API yet |
+| Audit events                            | `0019`        | `audit/` writes from mutating handlers                                   |
+| Product permission additions            | `0020`-`0021` | `roles/`                                                                 |
+| Platform admin role                     | `0022`        | -                                                                        |
+| Invites                                 | `0023`        | `roles/`, `auth/` (invite + accept, see section 6)                       |
+| Platform invites                        | `0024`        | `auth/` (`tenant_id` may be null on a platform invite)                   |
 
-Reading this table straight: the schema is ahead of the API for
-`module_toggles`, `price_rules`, `purchasing`, `billing`, and
-`audit_events`. Tables exist; no Rust handlers read or write them yet.
-That gap is real and is the most honest single measure of "how much of
-the design is actually live" right now.
+`module_toggles` and `price_rules` still have tables and no HTTP API.
+Purchasing, payments/refunds, and audit writes do. Subscription billing
+rows do not.
 
 ---
 
@@ -193,12 +192,19 @@ module in the backend):
   the response body instead (a Capacitor app has no server of its own to
   receive a cookie).
 
-**Not built yet:**
+Also built, and covered in `docs/atlas/auth-flow.md`:
 
-1. **Tenant/store switching mid-session** - currently requires a full
-   re-login. Low priority given the 1-20 store scale.
-2. **Rate limiting** - not implemented anywhere (no rate-limiting crate in
-   `Cargo.toml`). Tracked as a gap on `/auth/login`, not yet designed.
+- `GET /api/v1/auth/me`, `POST /api/v1/auth/switch-tenant`, and
+  `GET /api/v1/auth/platform/tenants`. A platform admin may enter any
+  existing tenant. Store selection is the `x-store-id` header (an HttpOnly
+  cookie on the web, memory on the POS).
+- `POST /api/v1/auth/platform/invite` for further platform staff. Migration
+  `0024` allows `invites.tenant_id` to be null.
+- Rate limiting: the `/api/v1/auth` router uses `rate_limit.rs` (in-memory,
+  per IP). OTP verify and reset also count attempts on the code.
+
+Still open on auth: Capacitor secure storage (the POS keeps tokens in
+memory), a checkout screen, and a UI that inserts a custom `atlas.roles` row.
 
 ---
 
@@ -218,28 +224,31 @@ module was written, not bolted on after. All three are actually in place:
   retried request after a flaky reconnect) is a no-op the second time, not
   a duplicate sale or a double stock deduction.
 
-What's not built: `atlas-pos` itself has no screens yet (see section 8),
-so nothing currently calls this endpoint end to end. The server-side
-contract is real; the client that exercises it isn't.
+What's not built: `atlas-pos` has login and a session home, and neither
+calls `POST /api/v1/sync/sales`. The server contract is real. The till
+that exercises it is not.
 
 ---
 
 ## 8. Frontend apps
 
-**`apps/atlas-marketing`** (Nuxt 4) - carries both the public marketing
+**`apps/atlas-web`** (Nuxt 4) - carries both the public marketing
 site and the authenticated owner/manager dashboard under one app, via a
 Nitro proxy that handles cookie/Bearer auth and 401-retry. A single app
 for both surfaces, rather than splitting marketing and dashboard into two
-apps, was a deliberate choice, made explicitly. Currently two pages exist
-(`index.vue`, `dashboard.vue`) plus a default layout - structure is in
-place, screens are not built out.
+apps, was a deliberate choice, made explicitly. `/` is the overview.
+Auth pages are `/auth/signup`, `/auth/verify-email`, `/auth/login`,
+`/auth/forgot-password`, `/auth/reset-password`, and `/auth/invites/[token]`.
+The signed-in home is `/dashboard`, with a full-width header and footer.
+The Nitro proxy copies `Set-Cookie`, retries refresh on 401, and returns
+502 when the API is down. `/dashboard` switches tenant and store.
 
 **`apps/atlas-pos`** - point of sale is a native/tablet client per the
 PRD, not a web page, so it's a separate Ionic + Capacitor app rather than
-a route inside `atlas-marketing`. One stub page (`HomePage.vue`) and
-router exist; no actual POS flow yet. Building it out is gated on the
-invite flow and mobile token delivery (section 6), not on anything in the
-offline design itself.
+a route inside `atlas-web`. `/login` and `/` exist (tenant switch,
+store pick, platform invite, logout). Tokens stay in memory. Checkout is
+the remaining screen, and it is what will call the sync endpoint in
+section 7.
 
 **`packages/atlas-ui/{core,web,app}`** - the three-package UI split
 (`ui-core` for cross-platform Vue components, `ui-web` for desktop-only
@@ -311,7 +320,7 @@ Recorded so they don't get silently re-litigated:
   default; the option is kept open, not built now.
 - **`store_group_grants`** (cross-store access short of full tenant-wide)
   - designed but deferred to v2, since the "regional manager over 3 of my
-  5 stores" case doesn't block v1.
+    5 stores" case doesn't block v1.
 - **Per-tenant theming** - not designed yet at all, tracked as an open
   question in section 8, not a rejected option - unlike the others here,
   nobody has decided against it, it just hasn't come up as a real need.
@@ -344,32 +353,22 @@ Honest read of the state above, not a sales pitch:
 
 **Not solid / open:**
 
-- **Test coverage is one file** (`tests/health_check.rs`). None of
-  `auth`, `products`, `roles`, `sales`, or `stock` have integration tests
-  yet, despite `roles::service::assert_permission` being the single
-  point every permission check in the system runs through - exactly the
-  kind of function that should have direct test coverage before more is
-  built on top of it.
+- **Test coverage is four files**: `health_check.rs`, `auth_flow_tests.rs`,
+  `roles_permission_tests.rs`, `commerce_tests.rs`. Still thin against the
+  purchasing and payments handlers.
 - **No CI.** Nothing currently stops a regression from merging.
-- **Five migrated tables have no API at all**: `module_toggles`,
-  `price_rules`, `purchasing`, `billing`, `audit_events`. Pricing in
-  particular is load-bearing to the whole product model (section 1) and
-  isn't reachable yet.
-- **`atlas-pos` has no real screens**, so the offline path that's fully
-  built server-side has never been exercised end to end by an actual
-  client.
-- **No rate limiting**, anywhere, including on `/auth/login`.
+- **`module_toggles` and `price_rules` have no HTTP API.** Pricing is
+  load-bearing to the product model (section 1). Purchasing, payments,
+  and audit writes do have handlers. Subscription billing does not.
+- **POS checkout is not built**, so the offline path has not been exercised
+  by a till.
 - **Design system is thin against the harder screens.** `ui-core` has 24
   components but almost no ARIA coverage, effectively no component tests,
-  and no per-tenant theming hook - see section 8. Fine for now since no
-  dashboard or POS screen exists yet to stress it, but worth closing
-  before those screens get built in earnest, not after.
+  and no per-tenant theming hook - see section 8.
 
-**Net:** the architecture, data model, and full auth/invite lifecycle are
-built out and match the design, not just documented as intent. The two
-real gaps are commercial completeness (pricing, purchasing, billing,
-audit - schema exists, no API yet) and test coverage on the permission
-logic everything else depends on.
+**Net:** auth, invite, tenant switch, store selection, and the marketing
+and POS session screens match this document. The open product gaps are
+pricing rules, subscription billing, POS checkout, and CI.
 
 ---
 
@@ -377,18 +376,11 @@ logic everything else depends on.
 
 Roughly in dependency order:
 
-1. Integration tests for `roles::service::assert_permission` and the
-   `auth` module - highest-leverage place to add coverage given how much
-   depends on both, and the auth lifecycle is now complete enough to be
-   worth locking down.
-2. `price_rules` and `module_toggles` APIs - pricing is core to the
-   product model, not a later nice-to-have.
-3. `purchasing`, `billing`, `audit_events` APIs.
-4. `atlas-pos` real screens, now that invite + `X-Client-Type` auth are
-   both in place to support them.
-5. Design-system accessibility and component test coverage (section 8) -
-   before, not after, the dashboard/POS screens that will depend on it
-   get built out.
-6. CI pipeline, rate limiting, tenant/store switching, per-tenant
-   theming - deferred until a concrete need forces the question, tracked
-   here so they aren't forgotten.
+1. `price_rules` and `module_toggles` APIs. Pricing is core to the product
+   model.
+2. Subscription billing HTTP API. Payments and refunds already have one.
+3. POS checkout that calls `POST /api/v1/sales` and `POST /api/v1/sync/sales`,
+   plus Capacitor secure storage for the refresh token.
+4. A screen that creates a custom role. Inviting an existing role is built.
+5. Design-system accessibility and component tests (section 8).
+6. CI. Rate limiting on `/api/v1/auth` and tenant/store switching are built.

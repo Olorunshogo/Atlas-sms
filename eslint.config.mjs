@@ -18,6 +18,17 @@ export default [
       '**/.nx',
       '**/.nuxt',
       '**/.output',
+      /*
+       * Raw React reference source, kept for porting into packages/atlas-ui and libs/shared/*.
+       * Not Atlas code, never meant to be linted as Vue/TS project source.
+       */
+      'packages/hooks/**',
+      'packages/lib/**',
+      'packages/api-client/**',
+      'packages/schemas/**',
+      'packages/types/**',
+      'packages/utils/**',
+      'packages/data/**',
     ],
   },
   // Base TypeScript configuration

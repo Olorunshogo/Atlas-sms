@@ -9,13 +9,13 @@ describes the system actually built, not that one - the two solve the same
 requirements brief with genuinely different architectures, for reasons
 explained in Section 1.
 
-| | |
-| --- | --- |
-| Document ID | ATLAS-SMS-2026-002 |
-| Version | 1.0 |
-| Status | Reflects the codebase as of this writing, not a target |
+|                     |                                                                               |
+| ------------------- | ----------------------------------------------------------------------------- |
+| Document ID         | ATLAS-SMS-2026-002                                                            |
+| Version             | 1.0                                                                           |
+| Status              | Reflects the codebase as of this writing, not a target                        |
 | Source requirements | `Store Management System - Requirements.pdf` (82 requirements, 14 categories) |
-| Classification | Internal - Engineering |
+| Classification      | Internal - Engineering                                                        |
 
 ---
 
@@ -37,8 +37,8 @@ explained in Section 1.
 14. Future Extensions (v2+)
 15. Alignment with Industry System-Design Practice
 16. Data Protection & Backup
-Appendix A: Data Dictionary
-Appendix B: Document Control
+    Appendix A: Data Dictionary
+    Appendix B: Document Control
 
 ---
 
@@ -82,9 +82,9 @@ one person is the normal case, not an edge case.
 
 - A single-tenant, offline-only deployment mode - the multi-tenant/RLS
   model is load-bearing throughout, not an add-on.
-- A full audit trail, reporting engine, or notification system - all
-  three are scoped in the source requirements but **not built**; see
-  Sections 9, 13, and 16.
+- A reporting engine and a notification system are scoped in the source
+  requirements and are not built. Mutating handlers do write
+  `audit_events`. There is no audit read API. See Sections 9, 13, and 16.
 - CI/CD - not invented ahead of the work it would gate.
 
 ---
@@ -94,8 +94,8 @@ one person is the normal case, not an edge case.
 ```mermaid
 flowchart TB
     subgraph Clients
-        Web["atlas-marketing (Nuxt 4)\nmarketing site + owner/manager dashboard"]
-        POS["atlas-pos (Ionic/Capacitor)\nscreens not yet built"]
+        Web["atlas-web (Nuxt 4)\nmarketing site + owner/manager dashboard"]
+        POS["atlas-pos (Ionic/Capacitor)\nlogin + session home"]
     end
 
     subgraph API["apps/atlas-backend (Rust / Axum)"]
@@ -108,7 +108,7 @@ flowchart TB
     DB[("Postgres 16\natlas schema, FORCE RLS\nport 5434, own container")]
 
     Web -- "cookie auth, Nitro proxy, 401-retry" --> Router
-    POS -. "X-Client-Type: app -\nbody tokens, no screens yet" .-> Router
+    POS -- "X-Client-Type: app\ntokens in the body" --> Router
     Router --> TenantTx --> Service --> DB
     Router --> AdminTx --> Service
 ```
@@ -138,20 +138,25 @@ layout" equivalent:
 ```
 apps/
   atlas-backend/          # Rust/Axum API
-    migrations/           # 23 sqlx migrations, schema of record
+    migrations/           # sqlx migrations, schema of record (through 0024)
     src/
-      auth/                # signup, login, refresh, invite, password reset
+      auth/                # signup, login, refresh, me, switch, platform invite
       tenants/ stores/     # tenant + store CRUD
       roles/               # roles, grants, assert_permission/assert_grantable
       products/ stock/     # catalogue, inventory ledger
-      sales/               # shifts, sales, sale lines
-      sync/                # offline sale sync endpoint
+      sales/ sync/         # shifts, sales, offline sale sync
+      purchasing/ payments/ customers/
+      audit.rs
       extractors.rs         # TenantTx / AdminTx
+      rate_limit.rs
       error.rs               # ApiError
     tests/
-      health_check.rs        # the only test in the backend
-  atlas-marketing/         # Nuxt 4 - marketing site + dashboard, one app
-  atlas-pos/               # Ionic/Capacitor - scaffold only, no screens
+      health_check.rs
+      auth_flow_tests.rs
+      roles_permission_tests.rs
+      commerce_tests.rs
+  atlas-web/         # Nuxt 4 - public site, auth screens, dashboard
+  atlas-pos/               # Ionic/Capacitor - login and session home
 packages/atlas-ui/
   core/ web/ app/           # shared Vue component library, three-package split
 libs/shared/
@@ -225,25 +230,25 @@ handler's own type signature, never a runtime toggle.
 
 ## 5. Domain Model & Schemas
 
-23 migrations, grouped by what they build. All IDs are UUIDv7
+Migrations through `20261020000024_platform_invites.sql`, grouped by what they build. All IDs are UUIDv7
 (`Uuid::now_v7()` in Rust, app-generated, never a database default -
 sequential IDs would let a tenant infer record counts from a public store
 slug). All timestamps are `TIMESTAMPTZ`.
 
-| Group | Tables | Notes |
-| --- | --- | --- |
-| Identity | `users` | One human, one row, ever. Access is entirely in `role_grants`, not here. |
-| Tenancy | `tenants`, `stores` | Flat - no ancestor chain. See Section 15's CAP/scaling note. |
-| Access | `roles`, `role_grants`, `store_group_grants` | Dynamic roles, not a fixed ladder. See Section 8. |
-| Auth | `email_otps`, `refresh_tokens`, `invites` | OTP verification, rotating refresh tokens, the invite flow. |
-| Catalogue | `product_types`, `units_of_measure`, `products`, `product_sale_units`, `product_store_listings` | Attribute-schema-per-type, not per-vertical columns; unit conversions; per-store cost/threshold/active flag. |
-| Inventory | `stock_items`, `stock_movements` | Append-only ledger; on-hand is `SUM(quantity)`, never a mutable column that could drift from it. |
-| Pricing | `customer_groups`, `price_rules` | Price is a resolved answer (product, store, group, quantity, date), never a bare column. |
-| Modules | `store_module_toggles` | Per-store feature flags (recipes, layaway, etc.) |
-| Sales | `shifts`, `customers`, `sales`, `sale_lines` | `sales.id` is the one client-generated PK in the schema - see Section 7.3. |
-| Purchasing | `suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_received_notes`, `goods_received_note_lines` | Schema only - see Section 13. |
-| Billing | `subscriptions`, `tenant_entitlements`, `payments`, `refunds` | Schema only - see Section 13. Refunds are a two-step confirm-token flow, not a single unconfirmed POST. |
-| Audit | `audit_events` | Schema only, nothing writes to it yet - see Sections 13, 16. |
+| Group      | Tables                                                                                                      | Notes                                                                                                        |
+| ---------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Identity   | `users`                                                                                                     | One human, one row, ever. Access is entirely in `role_grants`, not here.                                     |
+| Tenancy    | `tenants`, `stores`                                                                                         | Flat - no ancestor chain. See Section 15's CAP/scaling note.                                                 |
+| Access     | `roles`, `role_grants`, `store_group_grants`                                                                | Dynamic roles, not a fixed ladder. See Section 8.                                                            |
+| Auth       | `email_otps`, `refresh_tokens`, `invites`                                                                   | OTP verification, rotating refresh tokens, the invite flow.                                                  |
+| Catalogue  | `product_types`, `units_of_measure`, `products`, `product_sale_units`, `product_store_listings`             | Attribute-schema-per-type, not per-vertical columns; unit conversions; per-store cost/threshold/active flag. |
+| Inventory  | `stock_items`, `stock_movements`                                                                            | Append-only ledger; on-hand is `SUM(quantity)`, never a mutable column that could drift from it.             |
+| Pricing    | `customer_groups`, `price_rules`                                                                            | Price is a resolved answer (product, store, group, quantity, date), never a bare column.                     |
+| Modules    | `store_module_toggles`                                                                                      | Per-store feature flags (recipes, layaway, etc.)                                                             |
+| Sales      | `shifts`, `customers`, `sales`, `sale_lines`                                                                | `sales.id` is the one client-generated PK in the schema - see Section 7.3.                                   |
+| Purchasing | `suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_received_notes`, `goods_received_note_lines` | `purchasing/` handlers.                                                                                      |
+| Billing    | `subscriptions`, `tenant_entitlements`, `payments`, `refunds`                                               | Payments and refunds have handlers. Subscriptions do not. Refunds are a two-step confirm-token flow.         |
+| Audit      | `audit_events`                                                                                              | Written by mutating handlers via `audit::record`. No read API.                                               |
 
 Field-level detail for the tables actually in use is in Appendix A.
 
@@ -256,33 +261,43 @@ design assigns its CLI flags: every route has a fixed request shape and a
 fixed `{ message, success, data? }` response envelope, and that shape is
 what the (currently thin) test suite should be asserting against.
 
-| Method & Path | Handler | Auth |
-| --- | --- | --- |
-| `GET /health` | - | none |
-| `POST /api/v1/auth/signup` | `auth::signup` | none (`AdminTx`) |
-| `POST /api/v1/auth/verify-email` | `auth::verify_email` | none |
-| `POST /api/v1/auth/login` | `auth::login` | none |
-| `POST /api/v1/auth/refresh` | `auth::refresh` | refresh token |
-| `POST /api/v1/auth/invites/{token}/accept` | `auth::accept_invite` | invite token |
-| `POST /api/v1/auth/forgot-password` | `auth::forgot_password` | none |
-| `POST /api/v1/auth/reset-password` | `auth::reset_password` | OTP |
-| `GET /api/v1/tenants/me` | `tenants::get_current_tenant` | `TenantTx` |
-| `GET /api/v1/stores` / `POST /api/v1/stores` | `stores::list_stores` / `create_store` | `TenantTx` |
-| `GET /api/v1/roles` | `roles::list_roles` | `TenantTx` |
-| `POST /api/v1/roles/invite` | `roles::invite` | `TenantTx`, `staff.invite` |
-| `GET /api/v1/product-types` / `POST ...` | `products::*_product_types` | `TenantTx` |
-| `GET /api/v1/products` / `POST /api/v1/products` | `products::list_products` / `create_product` | `TenantTx` |
-| `GET /api/v1/stock/on-hand` | `stock::get_stock_on_hand` | `TenantTx` |
-| `POST /api/v1/stock/adjustments` | `stock::adjust_stock` | `TenantTx`, `stock.adjust` |
-| `POST /api/v1/stock/transfers` | `stock::transfer_stock` | `TenantTx`, `stock.transfer` |
-| `POST /api/v1/shifts` / `POST /api/v1/shifts/{id}/close` | `sales::open_shift` / `close_shift` | `TenantTx` |
-| `GET /api/v1/sales` / `POST /api/v1/sales` | `sales::list_sales` / `create_sale` | `TenantTx`, `sale.create` |
-| `GET /api/v1/sales/{id}/lines` | `sales::list_sale_lines` | `TenantTx` |
-| `POST /api/v1/sync/sales` | `sync::sync_sale` | `TenantTx`, `sale.create` |
+| Method & Path                                            | Handler                                      | Auth                           |
+| -------------------------------------------------------- | -------------------------------------------- | ------------------------------ |
+| `GET /health`                                            | -                                            | none                           |
+| `POST /api/v1/auth/signup`                               | `auth::signup`                               | none (`AdminTx`)               |
+| `POST /api/v1/auth/verify-email`                         | `auth::verify_email`                         | none                           |
+| `POST /api/v1/auth/login`                                | `auth::login`                                | none                           |
+| `POST /api/v1/auth/refresh`                              | `auth::refresh`                              | refresh token                  |
+| `POST /api/v1/auth/invites/{token}/accept`               | `auth::accept_invite`                        | invite token                   |
+| `POST /api/v1/auth/forgot-password`                      | `auth::forgot_password`                      | none                           |
+| `POST /api/v1/auth/reset-password`                       | `auth::reset_password`                       | OTP                            |
+| `GET /api/v1/tenants/me`                                 | `tenants::get_current_tenant`                | `TenantTx`                     |
+| `GET /api/v1/stores` / `POST /api/v1/stores`             | `stores::list_stores` / `create_store`       | `TenantTx`                     |
+| `GET /api/v1/roles`                                      | `roles::list_roles`                          | `TenantTx`                     |
+| `POST /api/v1/roles/invite`                              | `roles::invite`                              | `TenantTx`, `staff.invite`     |
+| `GET /api/v1/product-types` / `POST ...`                 | `products::*_product_types`                  | `TenantTx`                     |
+| `GET /api/v1/products` / `POST /api/v1/products`         | `products::list_products` / `create_product` | `TenantTx`                     |
+| `GET /api/v1/stock/on-hand`                              | `stock::get_stock_on_hand`                   | `TenantTx`                     |
+| `POST /api/v1/stock/adjustments`                         | `stock::adjust_stock`                        | `TenantTx`, `stock.adjust`     |
+| `POST /api/v1/stock/transfers`                           | `stock::transfer_stock`                      | `TenantTx`, `stock.transfer`   |
+| `POST /api/v1/shifts` / `POST /api/v1/shifts/{id}/close` | `sales::open_shift` / `close_shift`          | `TenantTx`                     |
+| `GET /api/v1/sales` / `POST /api/v1/sales`               | `sales::list_sales` / `create_sale`          | `TenantTx`, `sale.create`      |
+| `GET /api/v1/sales/{id}/lines`                           | `sales::list_sale_lines`                     | `TenantTx`                     |
+| `POST /api/v1/sync/sales`                                | `sync::sync_sale`                            | `TenantTx`, `sale.create`      |
+| `POST /api/v1/auth/logout`                               | `auth::logout`                               | refresh token (cookie or body) |
+| `GET /api/v1/auth/me`                                    | `auth::get_session`                          | access token                   |
+| `POST /api/v1/auth/switch-tenant`                        | `auth::switch_tenant`                        | access token                   |
+| `GET /api/v1/auth/platform/tenants`                      | `auth::list_platform_tenants`                | platform grant                 |
+| `POST /api/v1/auth/platform/invite`                      | `auth::invite_platform_staff`                | platform grant                 |
+| `GET/POST /api/v1/customers`                             | `customers::`                                | `TenantTx`                     |
+| `GET/POST /api/v1/suppliers`, purchase orders, receive   | `purchasing::`                               | `TenantTx`                     |
+| `GET/POST /api/v1/payments`, refund, confirm             | `payments::`                                 | `TenantTx`                     |
 
-No routes exist yet for: products (edit/deactivate/search), customers,
-suppliers/purchasing, payments/refunds, reports, notifications, or audit
-log reads. See Section 13.
+No routes yet for product edit/deactivate/search, `price_rules`,
+`module_toggles`, subscription billing, reports, notifications, or audit
+reads. The `/api/v1/auth` router is rate limited per IP. See Section 13
+for the requirements table, which has not been re-counted since the
+commerce handlers landed.
 
 ---
 
@@ -330,8 +345,17 @@ source PRD's "a shop can't stop selling because a modem blinked":
   sale twice (a retried request after a flaky reconnect) is a no-op the
   second time, not a duplicate sale or a double stock deduction.
 
-What's not built: `atlas-pos` has no real screens yet (Section 3), so
-nothing currently calls this endpoint end to end from a real device.
+What's not built: `atlas-pos` has login and a session home. Neither calls
+this endpoint. Checkout is the screen that will.
+
+When that screen gets built, the cart is where to finally use the Pinia
+dependency that already sits unused in the frontend: several actions
+mutating shared state, a running total read by multiple components, a
+payment-status flow, and a persistence need (a killed app or reloaded tab
+mid-sale should not lose the cart) that `pinia-plugin-persistedstate`
+covers in one line. That is a different concern from fetching or server
+sync, which stays on `@atlas/api` and the idempotent `sales.id` scheme
+above.
 
 ### 7.4 Invite a Role
 
@@ -364,16 +388,16 @@ roles (`atlas.roles` + `atlas.role_grants`), not a fixed enum - a role is
 a named bundle from a fixed 17-value permission enum, and a grant is
 (user, role, tenant, optional store).
 
-| Capability | owner | admin | store_manager | cashier | stock_clerk | accountant |
-| --- | --- | --- | --- | --- | --- | --- |
-| Manage tenant (`tenant.manage`) | ✔️ | ✖️ | ✖️ | ✖️ | ✖️ | ✖️ |
-| Invite / remove staff | ✔️ | ✔️ | invite only | ✖️ | ✖️ | ✖️ |
-| Create / update stores | ✔️ | ✔️ | ✖️ | ✖️ | ✖️ | ✖️ |
-| Manage products, units, prices | ✔️ | ✔️ | ✔️ | ✖️ | ✖️ | ✖️ |
-| Adjust / transfer stock | ✔️ | ✔️ | ✔️ | ✖️ | ✔️ | ✖️ |
-| View stock | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
-| Create / void / refund sales | ✔️ | ✔️ | ✔️ | create only | ✖️ | ✖️ |
-| View reports | ✔️ | ✔️ | ✔️ | ✖️ | ✖️ | ✔️ |
+| Capability                      | owner | admin | store_manager | cashier     | stock_clerk | accountant |
+| ------------------------------- | ----- | ----- | ------------- | ----------- | ----------- | ---------- |
+| Manage tenant (`tenant.manage`) | ✔️    | ✖️    | ✖️            | ✖️          | ✖️          | ✖️         |
+| Invite / remove staff           | ✔️    | ✔️    | invite only   | ✖️          | ✖️          | ✖️         |
+| Create / update stores          | ✔️    | ✔️    | ✖️            | ✖️          | ✖️          | ✖️         |
+| Manage products, units, prices  | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✖️         |
+| Adjust / transfer stock         | ✔️    | ✔️    | ✔️            | ✖️          | ✔️          | ✖️         |
+| View stock                      | ✔️    | ✔️    | ✔️            | ✔️          | ✔️          | ✔️         |
+| Create / void / refund sales    | ✔️    | ✔️    | ✔️            | create only | ✖️          | ✖️         |
+| View reports                    | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✔️         |
 
 **Enforcement**: `roles::service::assert_permission(conn, user, tenant,
 store, permission)` is the single generic check every handler calls - no
@@ -382,7 +406,7 @@ per-action bespoke SQL. It's satisfied by a `platform`-scope grant, a
 already, unused until v2) a `store_group_grants` row covering the store.
 **Containment**: `assert_grantable` - a caller can never hand out a
 permission they don't themselves hold, computed from the caller's
-*effective* permissions (the union across every active grant they hold at
+_effective_ permissions (the union across every active grant they hold at
 that scope), which is what makes the dynamic role system safe without a
 hardcoded role hierarchy.
 
@@ -437,7 +461,8 @@ in production with log aggregation.
 
 **Validation** is a mix, not a single dedicated layer the way the
 reference design's domain layer is: Postgres `CHECK` constraints (`price
->= 0`, `quantity != 0`, scope/store consistency on `role_grants`) and
+
+> = 0`, `quantity != 0`, scope/store consistency on `role_grants`) and
 Postgres enums (a typo'd permission or status string is rejected at write
 time) do most of the work; a handful of service-layer checks exist for
 anything a constraint can't express (e.g. `assert_grantable`'s permission
@@ -445,8 +470,8 @@ containment). There's no equivalent of the reference design's upfront
 "validate everything before any repository call" structural layer - a
 constraint violation surfaces as a Postgres error translated to
 `ApiError`, not a pre-flight domain check. Acceptable today given how few
-mutation paths exist; worth tightening before the product/pricing surface
-grows.
+> mutation paths exist; worth tightening before the product/pricing surface
+> grows.
 
 ---
 
@@ -491,48 +516,44 @@ writers are the normal case here (Section 1.1):
 
 ## 12. Testing Strategy
 
-| Layer | Reference design's target | Atlas today |
-| --- | --- | --- |
-| Domain / unit | Invariant tests (`#[cfg(test)]`) | None |
-| Repository / DB round-trip | Serialize/deserialize + crash simulation | None |
-| Service / integration | Per-workflow (checkout, return, RBAC denial) | None |
-| API end-to-end | Request/response assertion | `tests/health_check.rs` only |
+| Layer                      | Reference design's target                    | Atlas today                                                                               |
+| -------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Domain / unit              | Invariant tests (`#[cfg(test)]`)             | None                                                                                      |
+| Repository / DB round-trip | Serialize/deserialize + crash simulation     | None                                                                                      |
+| Service / integration      | Per-workflow (checkout, return, RBAC denial) | None                                                                                      |
+| API end-to-end             | Request/response assertion                   | `health_check.rs`, `auth_flow_tests.rs`, `roles_permission_tests.rs`, `commerce_tests.rs` |
 
-This is the most honest, single worst gap in the system relative to the
-reference design's testing strategy, not a difference in approach - there
-simply isn't one yet. `roles::service::assert_permission` is the one
-function every permission check in the system runs through and has zero
-direct test coverage. Before any further feature work, this is the
-highest-leverage place to add tests: a regression here silently breaks
-every module's access control at once, not just one feature.
+`assert_permission` has coverage in `roles_permission_tests.rs`. Purchasing
+and payments handlers are still thin. There is no CI.
 
 ---
 
 ## 13. Requirements Traceability
 
 Every requirement in `Store Management System - Requirements.pdf`,
-traced against what's actually callable today. **19 of 82 fully met**,
-10 partially met, 53 not met. Unlike a document claiming 82/82, this
-table is the honest current state, not a target - see Section 14 for
-what closes the gap.
+traced against an earlier pass of the API. **19 of 82 fully met**,
+10 partially met, 53 not met, counted before customers, purchasing,
+payments, audit writes, and the marketing and POS session screens.
+Those counts are stale. Section 6 is the live route list. Section 14
+is what is still open.
 
-| # | Category | Met | Partial | Not Met | / Total |
-| --- | --- | --- | --- | --- | --- |
-| 1 | User Management | 3 | 1 | 1 | 5 |
-| 2 | Product Management | 1 | 2 | 4 | 7 |
-| 3 | Inventory Management | 2 | 3 | 2 | 7 |
-| 4 | Supplier Management | 0 | 0 | 6 | 6 |
-| 5 | Customer Management | 0 | 0 | 4 | 4 |
-| 6 | Sales Management | 6 | 0 | 0 | 6 |
-| 7 | Order Management | 0 | 0 | 7 | 7 |
-| 8 | Payment Management | 0 | 0 | 6 | 6 |
-| 9 | Returns | 0 | 0 | 4 | 4 |
-| 10 | Reports | 0 | 0 | 9 | 9 |
-| 11 | Notifications | 0 | 0 | 6 | 6 |
-| 12 | Access Control | 4 | 1 | 0 | 5 |
-| 13 | Audit | 0 | 0 | 4 | 4 |
-| 14 | System Requirements | 3 | 3 | 0 | 6 |
-| | **Total** | **19** | **10** | **53** | **82** |
+| #   | Category             | Met    | Partial | Not Met | / Total |
+| --- | -------------------- | ------ | ------- | ------- | ------- |
+| 1   | User Management      | 3      | 1       | 1       | 5       |
+| 2   | Product Management   | 1      | 2       | 4       | 7       |
+| 3   | Inventory Management | 2      | 3       | 2       | 7       |
+| 4   | Supplier Management  | 0      | 0       | 6       | 6       |
+| 5   | Customer Management  | 0      | 0       | 4       | 4       |
+| 6   | Sales Management     | 6      | 0       | 0       | 6       |
+| 7   | Order Management     | 0      | 0       | 7       | 7       |
+| 8   | Payment Management   | 0      | 0       | 6       | 6       |
+| 9   | Returns              | 0      | 0       | 4       | 4       |
+| 10  | Reports              | 0      | 0       | 9       | 9       |
+| 11  | Notifications        | 0      | 0       | 6       | 6       |
+| 12  | Access Control       | 4      | 1       | 0       | 5       |
+| 13  | Audit                | 0      | 0       | 4       | 4       |
+| 14  | System Requirements  | 3      | 3       | 0       | 6       |
+|     | **Total**            | **19** | **10**  | **53**  | **82**  |
 
 ### 13.1 Detail by category
 
@@ -622,19 +643,14 @@ after the fact). Clear error messages: **Met** (Section 10).
 
 Near-term (closes traceability gaps above, roughly in order):
 
-1. Integration tests for `assert_permission`/`assert_grantable` and the
-   `auth` module (Section 12) - before more is built on an untested
-   permission core.
-2. `price_rules` and product edit/deactivate/search endpoints - pricing
-   is core to the product model (Section 1), not a later nice-to-have.
-3. Customer, supplier/purchasing, payment/refund, and returns APIs -
-   schema exists for all four, zero API.
-4. Audit-event writes from every mutating service call - the schema and
-   the mutation points already exist; this is wiring, not design.
-5. Reporting endpoints (Section 9) and notification triggers, once
-   there's enough real transaction volume to report on.
-6. `atlas-pos` real screens, now that the invite flow and
-   `X-Client-Type` mobile auth exist to support them.
+1. `price_rules` and product edit/deactivate/search endpoints. Pricing is
+   core to the product model (Section 1).
+2. Subscription billing and a returns API. Customers, purchasing, and
+   payments/refunds already have handlers.
+3. An audit read API. Writes already go through `audit::record`.
+4. Reporting endpoints (Section 9) and notification triggers.
+5. POS checkout, calling `POST /api/v1/sales` and `POST /api/v1/sync/sales`,
+   and Capacitor secure storage for the refresh token.
 
 Deferred, tracked in `docs/v2.md`:
 
@@ -644,27 +660,27 @@ Deferred, tracked in `docs/v2.md`:
   populates it yet.
 - `tenants.parent_tenant_id` - a real franchise/holding-company
   hierarchy, only if an actual need shows up.
-- CI pipeline, rate limiting, tenant/store mid-session switching,
-  per-tenant theming (design-system gap, see `docs/SystemDesign.md`
-  Section 8) - deferred until a concrete need forces the question.
+- CI, and per-tenant theming (design-system gap, see `docs/SystemDesign.md`
+  Section 8). Auth rate limiting and tenant/store switching are built.
+  See `docs/atlas/auth-flow.md`.
 
 ---
 
 ## 15. Alignment with Industry System-Design Practice
 
-| Pattern / Concept | Applies to Atlas? | How it's addressed |
-| --- | --- | --- |
-| Multi-tenancy via RLS | Yes - core | Postgres row-level security, `FORCE ROW LEVEL SECURITY` on every tenant table, Section 4.1. The textbook technique for shared-database multi-tenancy, used here rather than approximated. |
-| Horizontal scaling | Not yet, but unblocked | The API is stateless (auth is a JWT, not server session state), so it can run behind a load balancer with zero code changes once there's a reason to. Not done because there's one backend instance and no deployment target yet. |
-| Vertical scaling | Trivial | A native Rust binary; more CPU/RAM needs no code changes. |
-| Replication | Not configured | Postgres streaming replication is the standard answer; not set up because there's a single environment today, not a production deployment. |
-| CAP theorem | Partially relevant now, fully once POS syncs for real | The web path is a single-region CP system (RLS enforced synchronously, no partition to tolerate today). The POS offline-sync path (Section 7.3) already makes the opposite tradeoff deliberately - favour availability locally, reconcile via idempotent sync when connectivity returns - the same default the reference design recommends adopting once its own v2 branch-sync ships. |
-| Microservices | Deliberately not adopted | One Axum binary, modules split by domain internally. The service/handler boundary (Section 2) preserves the option to extract a module into its own service later without a rewrite, the same reasoning the reference design gives for its repository-trait boundary. |
-| Message queues | Not needed at current scale | In-process function calls are sufficient for today's write volume. The append-only `stock_movements`/eventual `audit_events` ledgers are already shaped like an event log, so they could seed a real queue later without a schema change. |
-| CQRS | Present in a light form | Reads go through plain `SELECT`s against the same tables writes use - no second datastore - but the read side (`on_hand_for_store`'s aggregation, Section 11) and the write side (validated command handlers) are already separate code paths, which is CQRS's actual read/write separation without the ceremony of a second store. |
-| Idempotency keys | Used | The sales/sync path (Section 7.3) is the one place this is needed today and it's implemented correctly; not yet a system-wide pattern because nothing else currently needs retried-write tolerance. |
-| Saga / compensating transactions | Not yet needed | Every current mutation fits in one Postgres transaction, so there's no cross-service coordination to compensate for. The refund flow's two-step confirm-token design (Section 5) is the closest thing to a compensating action in the schema today, though it has no API yet to exercise it. |
-| Sharding | Not needed | A tenant's full data volume at the stated 1-20-store scale fits comfortably in one Postgres instance. |
+| Pattern / Concept                | Applies to Atlas?                                     | How it's addressed                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multi-tenancy via RLS            | Yes - core                                            | Postgres row-level security, `FORCE ROW LEVEL SECURITY` on every tenant table, Section 4.1. The textbook technique for shared-database multi-tenancy, used here rather than approximated.                                                                                                                                                                                              |
+| Horizontal scaling               | Not yet, but unblocked                                | The API is stateless (auth is a JWT, not server session state), so it can run behind a load balancer with zero code changes once there's a reason to. Not done because there's one backend instance and no deployment target yet.                                                                                                                                                      |
+| Vertical scaling                 | Trivial                                               | A native Rust binary; more CPU/RAM needs no code changes.                                                                                                                                                                                                                                                                                                                              |
+| Replication                      | Not configured                                        | Postgres streaming replication is the standard answer; not set up because there's a single environment today, not a production deployment.                                                                                                                                                                                                                                             |
+| CAP theorem                      | Partially relevant now, fully once POS syncs for real | The web path is a single-region CP system (RLS enforced synchronously, no partition to tolerate today). The POS offline-sync path (Section 7.3) already makes the opposite tradeoff deliberately - favour availability locally, reconcile via idempotent sync when connectivity returns - the same default the reference design recommends adopting once its own v2 branch-sync ships. |
+| Microservices                    | Deliberately not adopted                              | One Axum binary, modules split by domain internally. The service/handler boundary (Section 2) preserves the option to extract a module into its own service later without a rewrite, the same reasoning the reference design gives for its repository-trait boundary.                                                                                                                  |
+| Message queues                   | Not needed at current scale                           | In-process function calls are sufficient for today's write volume. The append-only `stock_movements`/eventual `audit_events` ledgers are already shaped like an event log, so they could seed a real queue later without a schema change.                                                                                                                                              |
+| CQRS                             | Present in a light form                               | Reads go through plain `SELECT`s against the same tables writes use - no second datastore - but the read side (`on_hand_for_store`'s aggregation, Section 11) and the write side (validated command handlers) are already separate code paths, which is CQRS's actual read/write separation without the ceremony of a second store.                                                    |
+| Idempotency keys                 | Used                                                  | The sales/sync path (Section 7.3) is the one place this is needed today and it's implemented correctly; not yet a system-wide pattern because nothing else currently needs retried-write tolerance.                                                                                                                                                                                    |
+| Saga / compensating transactions | Not yet needed                                        | Every current mutation fits in one Postgres transaction, so there's no cross-service coordination to compensate for. The refund flow's two-step confirm-token design (Section 5) is the closest thing to a compensating action, and `payments/` now exercises it.                                                                                                                      |
+| Sharding                         | Not needed                                            | A tenant's full data volume at the stated 1-20-store scale fits comfortably in one Postgres instance.                                                                                                                                                                                                                                                                                  |
 
 ---
 
@@ -710,7 +726,7 @@ at yet. The plan:
   Postgres container, writing a timestamped `.sql.gz` to a gitignored
   local directory. Not a substitute for whatever the eventual production
   host provides - a stopgap so local data isn't one `docker compose down
-  -v` away from gone.
+-v` away from gone.
 - If self-hosting production ever becomes the actual plan rather than a
   managed host, the next step up is `pg_basebackup` plus WAL archiving
   for real point-in-time recovery, not just a periodic dump.
@@ -740,10 +756,9 @@ format. Not yet implemented.
 - **No documented encryption-at-rest or transport (TLS) configuration**
   in this repository - assumed to be handled at the hosting/deployment
   layer, not configured or verified here.
-- **No rate limiting** on `/auth/login` or any other endpoint.
-- **No audit trail** (Section 13) - "protect user and business
-  information" is only half-satisfied without a record of who touched
-  what.
+- **Auth routes are rate limited** per IP. Commerce routes are not.
+- **Audit rows are written** by mutating handlers. Nothing lists them back
+  to a tenant.
 
 ---
 
@@ -755,93 +770,93 @@ for every other table.
 
 ### users
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| id | UUID v7 | Primary key, app-generated |
-| full_name | TEXT | Not null |
-| email | TEXT | Unique among non-deleted rows |
-| phone | TEXT | Nullable |
-| password_hash | TEXT | Argon2id, not null |
-| is_email_verified | BOOLEAN | Default false |
-| deleted_at | TIMESTAMPTZ | Soft delete |
+| Field             | Type        | Constraints                   |
+| ----------------- | ----------- | ----------------------------- |
+| id                | UUID v7     | Primary key, app-generated    |
+| full_name         | TEXT        | Not null                      |
+| email             | TEXT        | Unique among non-deleted rows |
+| phone             | TEXT        | Nullable                      |
+| password_hash     | TEXT        | Argon2id, not null            |
+| is_email_verified | BOOLEAN     | Default false                 |
+| deleted_at        | TIMESTAMPTZ | Soft delete                   |
 
 ### tenants
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| id | UUID v7 | Primary key |
-| name | TEXT | Not null |
-| status | enum | `pending` \| `active` \| `suspended` |
-| created_by_user_id | UUID | FK -> users.id |
+| Field              | Type    | Constraints                          |
+| ------------------ | ------- | ------------------------------------ |
+| id                 | UUID v7 | Primary key                          |
+| name               | TEXT    | Not null                             |
+| status             | enum    | `pending` \| `active` \| `suspended` |
+| created_by_user_id | UUID    | FK -> users.id                       |
 
 ### stores
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| id | UUID v7 | Primary key |
-| tenant_id | UUID | FK -> tenants.id |
-| name / slug | TEXT | `UNIQUE(tenant_id, slug)` |
-| currency | CHAR(3) | Default `NGN` |
-| timezone | TEXT | Default `Africa/Lagos` |
-| is_active | BOOLEAN | Default true |
+| Field       | Type    | Constraints               |
+| ----------- | ------- | ------------------------- |
+| id          | UUID v7 | Primary key               |
+| tenant_id   | UUID    | FK -> tenants.id          |
+| name / slug | TEXT    | `UNIQUE(tenant_id, slug)` |
+| currency    | CHAR(3) | Default `NGN`             |
+| timezone    | TEXT    | Default `Africa/Lagos`    |
+| is_active   | BOOLEAN | Default true              |
 
 ### roles / role_grants
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| roles.permissions | `atlas.permission[]` | Enum array, not free text |
-| roles.is_system | BOOLEAN | System roles never editable |
-| role_grants.scope | enum | `platform` \| `tenant` \| `store`, each with a matching CHECK constraint |
-| role_grants.status | enum | `pending` \| `active` \| `revoked` |
+| Field              | Type                 | Constraints                                                              |
+| ------------------ | -------------------- | ------------------------------------------------------------------------ |
+| roles.permissions  | `atlas.permission[]` | Enum array, not free text                                                |
+| roles.is_system    | BOOLEAN              | System roles never editable                                              |
+| role_grants.scope  | enum                 | `platform` \| `tenant` \| `store`, each with a matching CHECK constraint |
+| role_grants.status | enum                 | `pending` \| `active` \| `revoked`                                       |
 
 ### products / product_store_listings
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| products.attributes | JSONB | Shape declared by the product's type, GIN-indexed |
-| products.sku | TEXT | `UNIQUE(tenant_id, sku)`, nullable |
-| product_store_listings.cost_amount_minor | BIGINT | Per-store cost |
-| product_store_listings.low_stock_threshold | NUMERIC | Default 0, unused by any query today |
+| Field                                      | Type    | Constraints                                       |
+| ------------------------------------------ | ------- | ------------------------------------------------- |
+| products.attributes                        | JSONB   | Shape declared by the product's type, GIN-indexed |
+| products.sku                               | TEXT    | `UNIQUE(tenant_id, sku)`, nullable                |
+| product_store_listings.cost_amount_minor   | BIGINT  | Per-store cost                                    |
+| product_store_listings.low_stock_threshold | NUMERIC | Default 0, unused by any query today              |
 
 ### stock_movements
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| movement_type | enum | `purchase_receipt` \| `sale` \| `sale_return` \| `adjustment` \| `transfer_out` \| `transfer_in` |
-| quantity | NUMERIC | `CHECK (quantity != 0)`, signed |
-| reason | TEXT | Not null - mandatory on every movement |
-| reference_id | UUID | Loosely-typed pointer to the sale/purchase/transfer that caused it |
+| Field         | Type    | Constraints                                                                                      |
+| ------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| movement_type | enum    | `purchase_receipt` \| `sale` \| `sale_return` \| `adjustment` \| `transfer_out` \| `transfer_in` |
+| quantity      | NUMERIC | `CHECK (quantity != 0)`, signed                                                                  |
+| reason        | TEXT    | Not null - mandatory on every movement                                                           |
+| reference_id  | UUID    | Loosely-typed pointer to the sale/purchase/transfer that caused it                               |
 
 ### sales / sale_lines
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| sales.id | UUID v7 | **Client-generated**, the one exception in the schema - doubles as the sync idempotency key |
-| sales.device_id | TEXT | Not null |
-| sales.status | enum | `held` \| `completed` \| `voided` |
-| sales.*_amount_minor | BIGINT | subtotal / discount / tax / total, integer minor units |
-| sale_lines.quantity | NUMERIC | `CHECK (quantity > 0)` |
+| Field                  | Type    | Constraints                                                                                 |
+| ---------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| sales.id               | UUID v7 | **Client-generated**, the one exception in the schema - doubles as the sync idempotency key |
+| sales.device_id        | TEXT    | Not null                                                                                    |
+| sales.status           | enum    | `held` \| `completed` \| `voided`                                                           |
+| sales.\*\_amount_minor | BIGINT  | subtotal / discount / tax / total, integer minor units                                      |
+| sale_lines.quantity    | NUMERIC | `CHECK (quantity > 0)`                                                                      |
 
-### payments / refunds (schema only - no API, Section 13)
+### payments / refunds
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| payments.status | enum | `pending` \| ... (payment_status) |
-| refunds.status | enum | `awaiting_confirmation` \| `executed` \| `expired` \| `cancelled` - two-step confirm flow |
+| Field           | Type | Constraints                                                                               |
+| --------------- | ---- | ----------------------------------------------------------------------------------------- |
+| payments.status | enum | `pending` \| ... (payment_status)                                                         |
+| refunds.status  | enum | `awaiting_confirmation` \| `executed` \| `expired` \| `cancelled` - two-step confirm flow |
 
 ---
 
 ## Appendix B: Document Control
 
-| Field | Detail |
-| --- | --- |
-| Document Title | ATLAS Store Management System - System Design Document |
-| Document ID | ATLAS-SMS-2026-002 |
-| Version | 1.0 |
-| Status | Reflects the codebase as-is, not a target state |
-| Source Requirements | `Store Management System - Requirements.pdf` |
-| Modeled On | `ATLAS_System_Design (1).pdf` (structure only - see Section 1.1 for why the architecture differs) |
-| Target Stack | Rust (stable), Axum, sqlx, Postgres 16, Nuxt 4, Ionic/Capacitor, Nx/pnpm |
-| Persistence Model | Postgres, row-level security, one `atlas` schema, migration-versioned |
-| Related Documents | `docs/SystemDesign.md`, `docs/RolesAndPermissions.md`, `docs/v2.md` |
-| Classification | Internal - Engineering |
+| Field               | Detail                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| Document Title      | ATLAS Store Management System - System Design Document                                            |
+| Document ID         | ATLAS-SMS-2026-002                                                                                |
+| Version             | 1.0                                                                                               |
+| Status              | Reflects the codebase as-is, not a target state                                                   |
+| Source Requirements | `Store Management System - Requirements.pdf`                                                      |
+| Modeled On          | `ATLAS_System_Design (1).pdf` (structure only - see Section 1.1 for why the architecture differs) |
+| Target Stack        | Rust (stable), Axum, sqlx, Postgres 16, Nuxt 4, Ionic/Capacitor, Nx/pnpm                          |
+| Persistence Model   | Postgres, row-level security, one `atlas` schema, migration-versioned                             |
+| Related Documents   | `docs/SystemDesign.md`, `docs/RolesAndPermissions.md`, `docs/v2.md`                               |
+| Classification      | Internal - Engineering                                                                            |

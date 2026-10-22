@@ -18,7 +18,7 @@ these conventions where a comment is actually warranted, not as decoration
 on every few lines - a file with a heading divider every five lines is
 noise, not structure.
 
-**Single-line:** `//` - Rust (`atlas-backend`), TypeScript/JavaScript, and inside Vue's `<script>`/`<script setup>` blocks (`atlas-marketing`, `atlas-pos`, `@atlas/ui-core`, `@atlas/ui-web`, `@atlas/ui-app`).
+**Single-line:** `//` - Rust (`atlas-backend`), TypeScript/JavaScript, and inside Vue's `<script>`/`<script setup>` blocks (`atlas-web`, `atlas-pos`, `@atlas/ui-core`, `@atlas/ui-web`, `@atlas/ui-app`).
 
 **Section-heading comments (`//` with `=` signs) - a heading hierarchy, use only the depth a file actually needs:**
 
@@ -38,7 +38,7 @@ noise, not structure.
 
 - Rust, TypeScript, JavaScript (anywhere outside JSX markup): `/** ... */` with each continuation line prefixed `* ` and aligned under the opening `/**`. Don't stack bare `// line one` / `// line two` comments to fake a paragraph, and don't write a single-line-style `/* all of this on one line */` for something that's actually multiple sentences of reasoning - use the JSDoc block shape above once it's genuinely multi-line.
 - JSX/TSX markup (only relevant if React ever reappears in this repo - there is no React code in the tree currently): `{/* ... */}` - the braces are required there because a JSX child must be a valid JS expression. `{/* */}` is invalid everywhere else - never use it in Rust or plain TS/JS logic.
-- Vue `<template>` blocks (`.vue` files across `atlas-marketing`, `atlas-pos`, `@atlas/ui-core`, `@atlas/ui-web`, `@atlas/ui-app`): HTML-style `<!-- ... -->`. Vue `<script>` blocks use normal `//` / `/** */`, not JSX or HTML syntax.
+- Vue `<template>` blocks (`.vue` files across `atlas-web`, `atlas-pos`, `@atlas/ui-core`, `@atlas/ui-web`, `@atlas/ui-app`): HTML-style `<!-- ... -->`. Vue `<script>` blocks use normal `//` / `/** */`, not JSX or HTML syntax.
 
 **No em dash in any comment**, single-line or block - same rule as markdown/commits/PRs elsewhere in this file. Use a plain hyphen or rewrite the sentence.
 
@@ -62,9 +62,9 @@ hardcodes a Tailwind colour; use the tokens in `libs/shared/theme`.
 **Before touching the schema or auth:** the migrations under
 `apps/atlas-backend/migrations/` are the source of truth for schema,
 ahead of any SQL excerpt in a doc.
-[docs/atlas/auth-flow.md](docs/atlas/auth-flow.md) is the auth design.
-Read the handlers under `apps/atlas-backend/src/auth/` before treating that
-doc as current: the doc lags the code in places.
+[docs/atlas/auth-flow.md](docs/atlas/auth-flow.md) matches the auth handlers
+and the marketing and POS screens. The migrations remain the schema source
+of truth if a doc and a migration disagree.
 
 **Package placement:** if a second app could plausibly need it, it does not
 live in an app. `@nx/enforce-module-boundaries` enforces this, so getting

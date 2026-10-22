@@ -61,11 +61,11 @@ product types" as a distinct grant, not pre-emptively.
 check constraints on `role_grants` so an invalid combination can't be
 written at all:
 
-| Scope | Meaning | Constraint |
-| --- | --- | --- |
+| Scope      | Meaning                                          | Constraint                 |
+| ---------- | ------------------------------------------------ | -------------------------- |
 | `platform` | Atlas's own internal staff, crosses every tenant | `tenant_id` must be `NULL` |
-| `tenant` | Every store the tenant has, now and later | `store_id` must be `NULL` |
-| `store` | One specific store only | `store_id` is required |
+| `tenant`   | Every store the tenant has, now and later        | `store_id` must be `NULL`  |
+| `store`    | One specific store only                          | `store_id` is required     |
 
 A `tenant`-scope grant is what lets an owner open store #2 tomorrow
 without a new grant - "every store" is expressed as "no store filter,"
@@ -122,7 +122,7 @@ connection inside one of these handlers. `TenantTx`:
    `set_config('app.current_tenant_id', ...)` from the token's `tenant_id`
    claim.
 3. Optionally sets `app.current_store_id` from an `x-store-id` header -
-   this one *is* a plain header, because it's the caller picking which
+   this one _is_ a plain header, because it's the caller picking which
    store's data to look at, not an identity claim. A role grant scoped to
    a different store still gets rejected, either by `assert_permission`
    or by row-level security itself.
@@ -187,13 +187,12 @@ ranking hardcoded anywhere). `roles::service::assert_grantable`:
    that the granter doesn't.
 
 One consequence worth naming explicitly: **nobody can grant
-`platform_admin`** through this flow. It's a different scope
-(`platform`, not `tenant`/`store`), and the invite code only ever writes
-`tenant`/`store`-scope grants - there's no code path that could produce a
-platform grant even if the permission-containment check somehow passed.
-`platform_admin` is seeded directly by migration
-(`...0022_seed_platform_admin_role.sql`) and provisioned by hand until
-Atlas has an internal admin tool for its own staff.
+`platform_admin`** through `POST /api/v1/roles/invite`. That handler only
+writes `tenant` or `store` scope. Further platform staff use
+`POST /api/v1/auth/platform/invite`, and the caller must already hold a
+platform grant. The role row itself is seeded by
+`20260922000022_seed_platform_admin_role.sql`. A new email lands in
+`atlas.invites` with `tenant_id` null (`20261020000024_platform_invites.sql`).
 
 A second consequence: **a tenant's own custom role goes through the
 exact same path** as a system role. There's no separate "custom role"
@@ -208,15 +207,15 @@ Six tenant-facing roles plus one platform role, seeded once with fixed
 UUIDs (so code can reference `owner`'s ID as a constant, not a name
 lookup):
 
-| Role | Scope in practice | Permissions |
-| --- | --- | --- |
-| `owner` | tenant-wide | Everything: sales, stock, purchasing, staff, stores, roles, reports, `tenant.manage`, `product.manage` |
-| `admin` | tenant-wide | Same as `owner` minus `tenant.manage` |
-| `store_manager` | usually store-scoped | Sales, stock, purchasing, `staff.invite`, `report.view`, `product.manage` - no `staff.remove`, `role.create`/`role.assign`, or store create/update |
-| `cashier` | store-scoped | `sale.create`, `stock.view` only |
-| `stock_clerk` | store-scoped | `stock.view`, `stock.adjust`, `stock.transfer` |
-| `accountant` | tenant **or** store-scoped (same role definition, only the grant's `store_id` differs) | `stock.view`, `report.view` |
-| `platform_admin` | platform | Everything `owner` has, plus it's the only role with `scope = 'platform'` |
+| Role             | Scope in practice                                                                      | Permissions                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`          | tenant-wide                                                                            | Everything: sales, stock, purchasing, staff, stores, roles, reports, `tenant.manage`, `product.manage`                                             |
+| `admin`          | tenant-wide                                                                            | Same as `owner` minus `tenant.manage`                                                                                                              |
+| `store_manager`  | usually store-scoped                                                                   | Sales, stock, purchasing, `staff.invite`, `report.view`, `product.manage` - no `staff.remove`, `role.create`/`role.assign`, or store create/update |
+| `cashier`        | store-scoped                                                                           | `sale.create`, `stock.view` only                                                                                                                   |
+| `stock_clerk`    | store-scoped                                                                           | `stock.view`, `stock.adjust`, `stock.transfer`                                                                                                     |
+| `accountant`     | tenant **or** store-scoped (same role definition, only the grant's `store_id` differs) | `stock.view`, `report.view`                                                                                                                        |
+| `platform_admin` | platform                                                                               | Everything `owner` has, plus it's the only role with `scope = 'platform'`                                                                          |
 
 `store_manager`, `cashier`, and `stock_clerk` are typically store-scoped
 grants in practice (per `docs/atlas/auth-flow.md`'s provisioning table),
@@ -240,9 +239,11 @@ this yet; it goes through the same `INSERT` shape as the seed data.
   join against it, but nothing writes to it yet. Deferred to v2 per
   `docs/v2.md`; the FK shape is settled now so it slots in later without
   a schema change.
-- **No admin UI for building custom roles or editing permission sets** -
-  possible today only by inserting rows directly.
-- **No tenant/store switching mid-session** - a user with grants in more
-  than one tenant must re-login naming which one. Low priority given
-  Atlas's 1-20-store-per-tenant scale.
-- **No rate limiting** on the invite or accept-invite endpoints.
+- **No admin UI for building custom roles or editing permission sets.**
+  Inviting an existing `role_id` is `POST /api/v1/roles/invite`. Nothing
+  inserts a custom `atlas.roles` row from a screen.
+- **Tenant and store switching are built.** `POST /api/v1/auth/switch-tenant`
+  re-issues the session. Store selection is the `x-store-id` header.
+- **Auth routes are rate limited** per IP (`rate_limit.rs`), including
+  invite and accept-invite because they sit on the auth router. Role
+  invite is under `/api/v1/roles`, so it is not covered by that limiter.

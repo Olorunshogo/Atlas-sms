@@ -10,7 +10,7 @@ import '@ionic/vue/css/structure.css';
 import '@ionic/vue/css/typography.css';
 
 /**
- * Shared theme tokens - same source as atlas-marketing, so colors/spacing
+ * Shared theme tokens - same source as atlas-web, so colors/spacing
  * stay identical across web and POS even though the component primitives
  * (Ion* vs reka-ui) differ.
  */

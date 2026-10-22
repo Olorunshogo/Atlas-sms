@@ -1,0 +1,24 @@
+{
+  "name": "@atlas/utils",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json"
+  },
+  "dependencies": {
+    "@atlas/data": "workspace:*",
+    "vee-validate": "catalog:"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.38"
+  },
+  "nx": {
+    "tags": [
+      "type:util"
+    ]
+  }
+}

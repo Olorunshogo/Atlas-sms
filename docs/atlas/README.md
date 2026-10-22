@@ -42,27 +42,35 @@ The pattern is narrow. What varies is the product model, the unit model, the ide
 Built once, identical for every store type. This is roughly eighty percent of the work.
 
 ### Stores
+
 Create a store, set its currency, tax treatment, opening hours, address, receipt layout, and its own settings that override tenant defaults.
 
 ### People and access
+
 Owners, managers, cashiers, stock clerks. A person belongs to one or more stores, with a role in each.
 
 ### Catalogue and inventory
+
 Products, variants, barcodes, units, cost price and selling price per store, stock levels, low stock alerts, transfers between stores, stock counts, adjustments with a mandatory reason on every movement.
 
 ### Sales
+
 Point of sale, receipts, discounts, returns, held carts, shift open and close with cash reconciliation.
 
 ### Purchasing
+
 Suppliers, purchase orders, goods received notes, supplier balances.
 
 ### Customers
+
 Profiles, purchase history, store credit, loyalty where the store wants it.
 
 ### Money
+
 Daily takings per store, expenses, profit per store, profit per product, comparisons across branches.
 
 ### Audit
+
 Who changed what, when, from which device. In a system handling stock and cash this is not optional and it is not a later feature.
 
 ---

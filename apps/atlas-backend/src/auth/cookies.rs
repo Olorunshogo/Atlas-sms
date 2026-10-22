@@ -4,7 +4,7 @@ use axum::http::HeaderMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientType {
-    /// `atlas-marketing`'s Nitro proxy - gets HttpOnly cookies, never tokens in the response body.
+    /// `atlas-web`'s Nitro proxy - gets HttpOnly cookies, never tokens in the response body.
     Web,
     /**
      * `atlas-pos` (Capacitor) - no server of its own to hold a cookie for it, so it gets tokens in the body instead.

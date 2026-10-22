@@ -9,42 +9,52 @@
 @import 'tailwindcss';
 
 /*
- * Neutral placeholder tokens. Atlas has not chosen its own visual identity
- * yet. Swap the values below in place when it does, keeping the same token
- * names so components don't need to change.
+ * Token names stay stable. Values match the Atlas palette:
+ * blue and teal are action weight, green amber and red are status only.
  */
 :root {
   /* === Surfaces */
-  --surface-canvas: #ffffff;
-  --surface-raised: #fafafa;
+  --surface-canvas: #f8fafc;
+  --surface-raised: #ffffff;
   --surface-sunken: #f4f4f5;
   --surface-inked: #0a0a0a;
 
   /* === Ink (text & iconography) */
-  --ink-primary: #0a0a0a;
+  --ink-primary: #172033;
   --ink-secondary: #3f3f46;
-  --ink-muted: #71717a;
+  --ink-muted: #64748b;
   --ink-disabled: #a1a1aa;
   --ink-inverse: #fafafa;
 
   /* === Borders */
-  --border-soft: #e4e4e7;
+  --border-soft: #e2e8f0;
   --border-firm: #d4d4d8;
   --border-inked: #0a0a0a;
 
-  /* === Brand accent - neutral placeholder until Atlas picks a hue */
-  --brand: #18181b;
-  --brand-hover: #27272a;
-  --brand-soft: #f4f4f5;
-  --brand-ink: #18181b;
+  /* === Brand accent */
+  --brand: #2563eb;
+  --brand-hover: #1d4ed8;
+  --brand-soft: #eff6ff;
+  --brand-ink: #ffffff;
+  --navy: #172033;
+  --navy-hover: #243044;
+  --navy-soft: #e7edf5;
+  --teal: #0f766e;
+  --teal-hover: #115e59;
+  --teal-soft: #f0fdfa;
 
   /* === Status (functional, not brand-specific) */
-  --success: #16a34a;
+  --success: #15803d;
   --success-soft: #f0fdf4;
-  --warning: #d97706;
+  --warning: #b45309;
   --warning-soft: #fffbeb;
-  --danger: #dc2626;
+  --danger: #b91c1c;
   --danger-soft: #fef2f2;
+
+  /* === Radius */
+  --shape-card: 1rem;
+  --shape-control: 0.75rem;
+  --shape-pill: 9999px;
 
   /* === Layout */
   --navbar-h: 5.8rem;
@@ -94,6 +104,12 @@
   --color-brand-hover: var(--brand-hover);
   --color-brand-soft: var(--brand-soft);
   --color-brand-ink: var(--brand-ink);
+  --color-navy: var(--navy);
+  --color-navy-hover: var(--navy-hover);
+  --color-navy-soft: var(--navy-soft);
+  --color-teal: var(--teal);
+  --color-teal-hover: var(--teal-hover);
+  --color-teal-soft: var(--teal-soft);
 
   /* === Status */
   --color-success: var(--success);
@@ -106,8 +122,8 @@
   /* === shadcn-vue primitive tokens (consumed by @atlasui-web) */
   --color-background: var(--surface-canvas);
   --color-foreground: var(--ink-primary);
-  --color-primary: var(--ink-primary);
-  --color-primary-foreground: var(--surface-canvas);
+  --color-primary: var(--brand);
+  --color-primary-foreground: var(--brand-ink);
   --color-secondary: var(--surface-sunken);
   --color-secondary-foreground: var(--ink-primary);
   --color-destructive: var(--danger);
@@ -116,13 +132,18 @@
   --color-muted-foreground: var(--ink-muted);
   --color-accent: var(--surface-raised);
   --color-accent-foreground: var(--ink-primary);
-  --color-popover: var(--surface-canvas);
+  --color-popover: var(--surface-raised);
   --color-popover-foreground: var(--ink-primary);
-  --color-card: var(--surface-canvas);
+  --color-card: var(--surface-raised);
   --color-card-foreground: var(--ink-primary);
   --color-border: var(--border-soft);
   --color-input: var(--border-soft);
-  --color-ring: var(--ink-primary);
+  --color-ring: var(--brand);
+
+  /* === Radius */
+  --radius-card: var(--shape-card);
+  --radius-control: var(--shape-control);
+  --radius-pill: var(--shape-pill);
 
   /* === Fonts */
   --font-outfit: 'Outfit', ui-sans-serif, system-ui, sans-serif;
@@ -162,9 +183,20 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* === Shared layout containers */
+/*
+ * Shared layout containers.
+ * Shells and sections use the same measure so the header row, the footer, and the page content line up.
+ */
 @layer components {
   .container-max-width {
+    @apply mx-auto w-full max-w-7xl;
+  }
+
+  .layout-max-width {
+    @apply mx-auto w-full max-w-7xl;
+  }
+
+  .section-max-width {
     @apply mx-auto w-full max-w-7xl;
   }
 }
