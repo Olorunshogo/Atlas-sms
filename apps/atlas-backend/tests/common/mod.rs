@@ -272,3 +272,84 @@ pub async fn on_hand(router: &Router, token: &str, store_id: Uuid, product_id: U
         .map(|level| level["on_hand"].as_str().unwrap().to_string())
         .unwrap_or_else(|| "0".to_string());
 }
+
+// === Selling fixtures
+
+pub async fn list_at(router: &Router, token: &str, product_id: Uuid, store_id: Uuid) {
+    let (status, body) = call(
+        router,
+        "PUT",
+        &format!("/api/v1/products/{}/listings/{}", product_id, store_id),
+        Some(&as_user(token)),
+        Some(json!({ "cost_amount_minor": null, "low_stock_threshold": null, "is_active": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+/// A price rule per base unit; `store_id: None` applies at every store.
+pub async fn price_rule(router: &Router, token: &str, product_id: Uuid, store_id: Option<Uuid>, amount_minor: i64) -> Uuid {
+    let (status, body) = post(
+        router,
+        &format!("/api/v1/products/{}/price-rules", product_id),
+        &as_user(token),
+        json!({ "store_id": store_id, "unit_price_amount_minor": amount_minor }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+pub async fn sale_unit(router: &Router, token: &str, product_id: Uuid, unit_id: Uuid, factor: &str) {
+    let (status, body) = post(
+        router,
+        &format!("/api/v1/products/{}/sale-units", product_id),
+        &as_user(token),
+        json!({ "unit_id": unit_id, "factor_to_base": factor }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+pub async fn barcode(router: &Router, token: &str, product_id: Uuid, unit_id: Option<Uuid>, code: &str) {
+    let (status, body) = post(
+        router,
+        &format!("/api/v1/products/{}/barcodes", product_id),
+        &as_user(token),
+        json!({ "barcode": code, "unit_id": unit_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+pub async fn tax_rate(router: &Router, token: &str, name: &str, basis_points: i32) -> Uuid {
+    let (status, body) = post(router, "/api/v1/tax-rates", &as_user(token), json!({ "name": name, "rate_basis_points": basis_points })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+pub async fn store_settings(router: &Router, token: &str, store_id: Uuid, settings: Value) {
+    let (status, body) = patch(router, &format!("/api/v1/stores/{}/settings", store_id), &as_user(token), settings).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+/// A sellable product: created, listed at `store_id`, priced per base unit, with `stock` on hand.
+#[allow(clippy::too_many_arguments)]
+pub async fn sellable(
+    router: &Router,
+    token: &str,
+    store_id: Uuid,
+    unit_id: Uuid,
+    name: &str,
+    sku: &str,
+    price_minor: i64,
+    stock: &str,
+) -> Uuid {
+    let product_id = create_product(router, token, unit_id, name, sku).await;
+    list_at(router, token, product_id, store_id).await;
+    price_rule(router, token, product_id, None, price_minor).await;
+    if stock != "0" {
+        stock_up(router, token, store_id, product_id, stock).await;
+    }
+    return product_id;
+}
