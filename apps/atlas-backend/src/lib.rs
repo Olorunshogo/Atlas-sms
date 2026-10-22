@@ -15,6 +15,7 @@ mod customers;
 mod email;
 mod error;
 mod extractors;
+mod inventory;
 mod payments;
 mod products;
 mod purchasing;
