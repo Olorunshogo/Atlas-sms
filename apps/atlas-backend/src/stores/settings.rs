@@ -1,6 +1,7 @@
 /*!
  * The per-store sales configuration: tax treatment, rounding, discount,
- * stock and pay-later policy, and what the receipt prints about the branch. Read by anyone selling at the store, changed only with
+ * stock, pay-later and returns policy, and what the receipt prints about
+ * the branch. Read by anyone selling at the store, changed only with
  * `store.update` at that store.
  */
 use axum::extract::Path;
@@ -16,7 +17,8 @@ use crate::roles;
 
 const SETTINGS_COLUMNS: &str = "id, currency, timezone, prices_include_tax, default_tax_rate_id,
      cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later,
-     address, phone, receipt_prefix, receipt_header, receipt_footer";
+     address, phone, receipt_prefix, receipt_header, receipt_footer, return_window_days,
+     refund_approval_threshold_minor, restockable_conditions::text[] AS restockable_conditions";
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct StoreSettings {
@@ -35,6 +37,12 @@ pub struct StoreSettings {
     pub receipt_prefix: Option<String>,
     pub receipt_header: Option<String>,
     pub receipt_footer: Option<String>,
+    /// Whole local days after the sale in which a return needs no approval.
+    pub return_window_days: i32,
+    /// A refund at or above this needs approval; `None` means no amount limit.
+    pub refund_approval_threshold_minor: Option<i64>,
+    /// Item conditions that go back into saleable stock on return.
+    pub restockable_conditions: Vec<String>,
 }
 
 fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -60,6 +68,10 @@ pub struct UpdateStoreSettingsRequest {
     pub receipt_prefix: Option<String>,
     pub receipt_header: Option<String>,
     pub receipt_footer: Option<String>,
+    pub return_window_days: Option<i32>,
+    #[serde(default, deserialize_with = "explicit_null")]
+    pub refund_approval_threshold_minor: Option<Option<i64>>,
+    pub restockable_conditions: Option<Vec<String>>,
 }
 
 /// `GET /api/v1/stores/:id/settings`. Requires `sale.create` or `store.update` at the store.
@@ -87,6 +99,17 @@ pub async fn update_settings(
     if body.max_cashier_discount_basis_points.is_some_and(|v| !(0..=10_000).contains(&v)) {
         return Err(ApiError::bad_request("max_cashier_discount_basis_points must be between 0 and 10000"));
     }
+    if body.return_window_days.is_some_and(|v| v < 0) {
+        return Err(ApiError::bad_request("return_window_days must not be negative"));
+    }
+    if body.refund_approval_threshold_minor.flatten().is_some_and(|v| v <= 0) {
+        return Err(ApiError::bad_request("refund_approval_threshold_minor must be positive"));
+    }
+    if let Some(conditions) = &body.restockable_conditions {
+        if let Some(bad) = conditions.iter().find(|c| !crate::returns::models::CONDITIONS.contains(&c.as_str())) {
+            return Err(ApiError::bad_request(format!("unknown item condition: {}", bad)));
+        }
+    }
     let before = fetch(&mut tx, store_id).await?;
 
     sqlx::query(
@@ -102,6 +125,9 @@ pub async fn update_settings(
              receipt_prefix = COALESCE($11, receipt_prefix),
              receipt_header = COALESCE($12, receipt_header),
              receipt_footer = COALESCE($13, receipt_footer),
+             return_window_days = COALESCE($14, return_window_days),
+             refund_approval_threshold_minor = CASE WHEN $15 THEN $16 ELSE refund_approval_threshold_minor END,
+             restockable_conditions = COALESCE($17::atlas.item_condition[], restockable_conditions),
              updated_at = now()
          WHERE id = $1",
     )
@@ -118,6 +144,10 @@ pub async fn update_settings(
     .bind(body.receipt_prefix.as_deref().map(|p| p.trim().to_uppercase()))
     .bind(&body.receipt_header)
     .bind(&body.receipt_footer)
+    .bind(body.return_window_days)
+    .bind(body.refund_approval_threshold_minor.is_some())
+    .bind(body.refund_approval_threshold_minor.flatten())
+    .bind(&body.restockable_conditions)
     .execute(&mut *tx)
     .await?;
 

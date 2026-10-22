@@ -129,7 +129,7 @@ fn local_time(at: DateTime<Utc>, timezone: &str) -> String {
 
 /**
  * The next receipt number for a store, from its counter row under that row's lock (the second lock in the documented order, after the sale row).
- * Formatted `{prefix}-{seq:08}`; the prefix is the store's `receipt_prefix`, else the first four letters or digits of its slug.
+ * Formatted `{prefix}-{seq:08}`, see `store_prefix`.
  */
 async fn next_receipt_number(conn: &mut PgConnection, tenant_id: Uuid, store_id: Uuid) -> Result<String, ApiError> {
     sqlx::query(
@@ -145,14 +145,20 @@ async fn next_receipt_number(conn: &mut PgConnection, tenant_id: Uuid, store_id:
     .bind(store_id)
     .fetch_one(&mut *conn)
     .await?;
-    let prefix: String = sqlx::query_scalar(
+    let prefix = store_prefix(conn, store_id).await?;
+    return Ok(format!("{}-{:08}", prefix, sequence));
+}
+
+/// The store's `receipt_prefix`, else the first four letters or digits of its slug, upper-cased. Shared by receipt and return numbers.
+pub async fn store_prefix(conn: &mut PgConnection, store_id: Uuid) -> Result<String, ApiError> {
+    return sqlx::query_scalar(
         "SELECT COALESCE(NULLIF(trim(receipt_prefix), ''), upper(left(regexp_replace(slug, '[^a-zA-Z0-9]', '', 'g'), 4)))
          FROM atlas.stores WHERE id = $1",
     )
     .bind(store_id)
-    .fetch_one(&mut *conn)
-    .await?;
-    return Ok(format!("{}-{:08}", prefix, sequence));
+    .fetch_one(conn)
+    .await
+    .map_err(ApiError::from);
 }
 
 /// Numbers a just-completed sale and writes its immutable receipt snapshot. Called once, from `checkout::complete_sale`.

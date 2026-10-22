@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::payments::models::Payment;
+use crate::payments::models::{Payment, Refund};
 use crate::pricing::models::{CartLineInput, DiscountInput};
 
 // === Shifts
@@ -159,4 +159,5 @@ pub struct SaleDetail {
     pub sale: Sale,
     pub lines: Vec<SaleLine>,
     pub payments: Vec<Payment>,
+    pub refunds: Vec<Refund>,
 }

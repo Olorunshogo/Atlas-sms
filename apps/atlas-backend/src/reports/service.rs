@@ -67,22 +67,21 @@ pub async fn reconcile(conn: &mut PgConnection, query: &ReconciliationQuery) -> 
     .fetch_one(&mut *conn)
     .await?;
 
-    // Refunds to store credit never touch a payment row; returns add them.
-    let non_payment_refunds_minor = 0;
+    let non_payment_refunds_minor = non_payment_refunds(conn, query).await?;
 
     let discrepancies: Vec<Uuid> = sqlx::query_scalar(&format!(
         "SELECT s.id
          FROM atlas.sales s
          CROSS JOIN LATERAL (
-             SELECT COALESCE(SUM(p.amount_minor) FILTER (WHERE {collected}), 0) AS collected,
-                    COALESCE(SUM(p.refunded_amount_minor), 0) AS refunded
+             SELECT COALESCE(SUM(p.amount_minor) FILTER (WHERE {collected}), 0) AS collected
              FROM atlas.payments p WHERE p.sale_id = s.id
          ) pay
          WHERE {filter}
            AND (s.amount_paid_minor <> pay.collected
                 OR (s.status = 'completed' AND s.payment_status = 'paid'
                     AND s.amount_paid_minor < s.total_amount_minor + s.rounding_adjustment_minor)
-                OR s.amount_refunded_minor < pay.refunded)
+                OR s.amount_refunded_minor <> (SELECT COALESCE(SUM(r.amount_minor), 0) FROM atlas.refunds r
+                                               WHERE r.sale_id = s.id AND r.status = 'executed'))
          ORDER BY s.created_at",
         collected = COLLECTED,
         filter = SALE_FILTER
@@ -111,6 +110,23 @@ pub async fn reconcile(conn: &mut PgConnection, query: &ReconciliationQuery) -> 
     });
 }
 
+/// Refunds that never touched a payment row (to store credit, or out through a different method), so the payments side can account for them.
+async fn non_payment_refunds(conn: &mut PgConnection, query: &ReconciliationQuery) -> Result<i64, ApiError> {
+    return sqlx::query_scalar(&format!(
+        "SELECT COALESCE(SUM(r.amount_minor), 0)::bigint
+         FROM atlas.refunds r JOIN atlas.sales s ON s.id = r.sale_id
+         WHERE r.payment_id IS NULL AND r.status = 'executed' AND {}",
+        SALE_FILTER
+    ))
+    .bind(query.store_id)
+    .bind(query.shift_id)
+    .bind(query.from)
+    .bind(query.to)
+    .fetch_one(conn)
+    .await
+    .map_err(ApiError::from);
+}
+
 /**
  * What should be in the drawer for a shift: the opening float plus cash taken in the shift, less cash refunded out of it.
  * Cash payments store the amount applied to the sale, change already excluded, so a N10,000 note for a N7,500 sale adds N7,500.
@@ -128,8 +144,15 @@ pub async fn shift_cash_summary(conn: &mut PgConnection, shift_id: Uuid) -> Resu
         .fetch_all(&mut *conn)
         .await?;
     let cash_collected: i64 = by_method.iter().filter(|m| m.kind == "cash").map(|m| m.collected_minor).sum();
-    // Cash refunds arrive with returns.
-    let cash_refunded = 0;
+    let cash_refunded: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(r.amount_minor), 0)::bigint
+         FROM atlas.refunds r
+         JOIN atlas.payment_methods pm ON pm.id = r.payment_method_id
+         WHERE r.shift_id = $1 AND r.status = 'executed' AND pm.kind = 'cash'",
+    )
+    .bind(shift_id)
+    .fetch_one(&mut *conn)
+    .await?;
     let expected = opening + cash_collected - cash_refunded;
 
     return Ok(ShiftCashSummary {

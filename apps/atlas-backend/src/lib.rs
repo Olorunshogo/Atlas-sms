@@ -24,6 +24,7 @@ mod purchasing;
 mod rate_limit;
 mod reports;
 mod response;
+mod returns;
 pub mod roles;
 mod sales;
 mod state;
@@ -89,7 +90,8 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/products", API_PREFIX), products::router())
         .nest(&format!("{}/stock", API_PREFIX), stock::router())
         .nest(&format!("{}/shifts", API_PREFIX), sales::shifts_router())
-        .nest(&format!("{}/sales", API_PREFIX), sales::router())
+        .nest(&format!("{}/sales", API_PREFIX), sales::router().merge(returns::sale_routes()))
+        .nest(&format!("{}/returns", API_PREFIX), returns::router())
         .nest(&format!("{}/sync", API_PREFIX), sync::router())
         .nest(&format!("{}/reports", API_PREFIX), reports::router())
         .with_state(state);

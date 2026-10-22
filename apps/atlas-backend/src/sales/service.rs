@@ -34,7 +34,7 @@ pub async fn open_shift(
     .map_err(|err| match err {
         // shifts_one_open_per_store_idx - the store already has an open shift.
         sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
-            ApiError::conflict_with_code("This store already has an open shift.", "SHIFT_ALREADY_OPEN")
+            ApiError::conflict_with_code("This store already has an open shift.", codes::SHIFT_ALREADY_OPEN)
         }
         other => ApiError::from(other),
     });
@@ -114,7 +114,8 @@ pub async fn lock_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Sale, A
 pub async fn sale_detail(conn: &mut PgConnection, sale: Sale) -> Result<SaleDetail, ApiError> {
     let lines = list_sale_lines(conn, sale.id).await?;
     let payments = payments::list_payments_for_sale(conn, sale.id).await?;
-    return Ok(SaleDetail { sale, lines, payments });
+    let refunds = payments::list_refunds_for_sale(conn, sale.id).await?;
+    return Ok(SaleDetail { sale, lines, payments, refunds });
 }
 
 pub async fn list_sale_lines(conn: &mut PgConnection, sale_id: Uuid) -> Result<Vec<SaleLine>, ApiError> {
@@ -156,9 +157,15 @@ pub async fn void_sale(
             codes::SALE_NOT_VOIDABLE,
         ));
     }
-    if sale.amount_refunded_minor > 0 {
+    let has_returns: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM atlas.returns WHERE sale_id = $1 AND status IN ('pending_approval', 'completed'))",
+    )
+    .bind(sale_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if sale.amount_refunded_minor > 0 || has_returns {
         return Err(ApiError::conflict_with_code(
-            "Part of this sale has already been refunded; it can no longer be voided.",
+            "Part of this sale has already been returned or refunded; it can no longer be voided.",
             codes::SALE_NOT_VOIDABLE,
         ));
     }
