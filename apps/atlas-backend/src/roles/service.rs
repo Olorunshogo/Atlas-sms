@@ -38,6 +38,26 @@ pub async fn assert_permission(
     store_id: Option<Uuid>,
     permission: &str,
 ) -> Result<(), ApiError> {
+    return match has_permission(conn, user_id, tenant_id, store_id, permission).await? {
+        true => Ok(()),
+        false => Err(ApiError::forbidden(format!(
+            "Missing permission: {}",
+            permission
+        ))),
+    };
+}
+
+/**
+ * Same check as `assert_permission`, answered as a bool instead of a 403.
+ * For decisions that change behaviour rather than block the request outright - a discount above the cashier limit, a price override, whether a return needs approval.
+ */
+pub async fn has_permission(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    tenant_id: Uuid,
+    store_id: Option<Uuid>,
+    permission: &str,
+) -> Result<bool, ApiError> {
     let granted: Option<i32> = sqlx::query_scalar(
         r#"
         SELECT 1
@@ -65,13 +85,91 @@ pub async fn assert_permission(
     .fetch_optional(conn)
     .await?;
 
-    return match granted {
-        Some(_) => Ok(()),
-        None => Err(ApiError::forbidden(format!(
-            "Missing permission: {}",
-            permission
-        ))),
-    };
+    return Ok(granted.is_some());
+}
+
+/// Where a permission reaches for one user: every store in the tenant, or only an explicit list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreScope {
+    All,
+    Stores(Vec<Uuid>),
+}
+
+impl StoreScope {
+    pub fn includes(&self, store_id: Uuid) -> bool {
+        return match self {
+            StoreScope::All => true,
+            StoreScope::Stores(ids) => ids.contains(&store_id),
+        };
+    }
+
+    /// `None` means unrestricted, for binding straight into a `($n::uuid[] IS NULL OR store_id = ANY($n))` filter.
+    pub fn as_filter(&self) -> Option<Vec<Uuid>> {
+        return match self {
+            StoreScope::All => None,
+            StoreScope::Stores(ids) => Some(ids.clone()),
+        };
+    }
+}
+
+/**
+ * The stores a permission covers for this user, for list endpoints that span stores (sales search, customer history) instead of naming one.
+ * A platform or tenant grant covers every store; otherwise it's the union of store grants and store-group grants. An empty list means the permission reaches nowhere and callers should 403.
+ */
+pub async fn stores_with_permission(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    tenant_id: Uuid,
+    permission: &str,
+) -> Result<StoreScope, ApiError> {
+    let wide: Option<i32> = sqlx::query_scalar(
+        r#"
+        SELECT 1
+        FROM atlas.role_grants rg
+        JOIN atlas.roles r ON r.id = rg.role_id
+        WHERE rg.user_id = $1
+          AND rg.status = 'active'
+          AND $3::atlas.permission = ANY(r.permissions)
+          AND (rg.scope = 'platform' OR (rg.scope = 'tenant' AND rg.tenant_id = $2))
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(tenant_id)
+    .bind(permission)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if wide.is_some() {
+        return Ok(StoreScope::All);
+    }
+
+    let stores: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT store_id FROM (
+            SELECT rg.store_id
+            FROM atlas.role_grants rg
+            JOIN atlas.roles r ON r.id = rg.role_id
+            WHERE rg.user_id = $1 AND rg.status = 'active' AND rg.tenant_id = $2
+              AND rg.scope = 'store' AND $3::atlas.permission = ANY(r.permissions)
+            UNION
+            SELECT sgg.store_id
+            FROM atlas.role_grants rg
+            JOIN atlas.roles r ON r.id = rg.role_id
+            JOIN atlas.store_group_grants sgg ON sgg.role_grant_id = rg.id
+            WHERE rg.user_id = $1 AND rg.status = 'active' AND rg.tenant_id = $2
+              AND $3::atlas.permission = ANY(r.permissions)
+        ) s
+        WHERE store_id IS NOT NULL
+        "#,
+    )
+    .bind(user_id)
+    .bind(tenant_id)
+    .bind(permission)
+    .fetch_all(conn)
+    .await?;
+
+    return Ok(StoreScope::Stores(stores));
 }
 
 /**
