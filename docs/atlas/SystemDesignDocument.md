@@ -260,7 +260,11 @@ Field-level detail for the tables actually in use is in Appendix A.
 The HTTP API is Atlas's interface contract, the same role the reference
 design assigns its CLI flags: every route has a fixed request shape and a
 fixed `{ message, success, data? }` response envelope, and that shape is
-what the (currently thin) test suite should be asserting against.
+what the test suite asserts against.
+
+The table below is the route map. Request and response bodies, query
+parameters, permissions and error codes for every route are in
+[api-reference.md](api-reference.md).
 
 | Method & Path                                            | Handler                                      | Auth                           |
 | -------------------------------------------------------- | -------------------------------------------- | ------------------------------ |
