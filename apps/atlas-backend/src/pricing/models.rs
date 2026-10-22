@@ -86,7 +86,6 @@ pub struct PricedLine {
     pub line_total_amount_minor: i64,
     pub on_hand: Decimal,
     #[serde(skip)]
-    #[allow(dead_code)]
     pub discount_reason: Option<String>,
 }
 

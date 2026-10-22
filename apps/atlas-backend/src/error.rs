@@ -70,7 +70,6 @@ impl ApiError {
 // === Error codes
 
 /// Machine-readable `code` values for the sales, payments, returns and customer flows, kept here so the POS can switch on one list instead of scattered literals.
-#[allow(dead_code)]
 pub mod codes {
     pub const PRODUCT_OUT_OF_STOCK: &str = "PRODUCT_OUT_OF_STOCK";
     pub const PRODUCT_NOT_SOLD_HERE: &str = "PRODUCT_NOT_SOLD_HERE";
@@ -89,19 +88,18 @@ pub mod codes {
     pub const PAYMENT_METHOD_INVALID: &str = "PAYMENT_METHOD_INVALID";
     pub const DUPLICATE_PAYMENT_REFERENCE: &str = "DUPLICATE_PAYMENT_REFERENCE";
     pub const INVALID_PAYMENT_TRANSITION: &str = "INVALID_PAYMENT_TRANSITION";
-    pub const RETURN_WINDOW_EXPIRED: &str = "RETURN_WINDOW_EXPIRED";
     pub const RETURN_QUANTITY_EXCEEDED: &str = "RETURN_QUANTITY_EXCEEDED";
     pub const REFUND_AMOUNT_EXCEEDED: &str = "REFUND_AMOUNT_EXCEEDED";
     pub const ITEM_NOT_RETURNABLE: &str = "ITEM_NOT_RETURNABLE";
-    pub const APPROVAL_REQUIRED: &str = "APPROVAL_REQUIRED";
     pub const APPROVAL_SELF_FORBIDDEN: &str = "APPROVAL_SELF_FORBIDDEN";
     pub const SALE_NOT_COMPLETED: &str = "SALE_NOT_COMPLETED";
     pub const SALE_NOT_VOIDABLE: &str = "SALE_NOT_VOIDABLE";
     pub const RETURN_NOT_PENDING: &str = "RETURN_NOT_PENDING";
     pub const CUSTOMER_REQUIRED: &str = "CUSTOMER_REQUIRED";
     pub const CUSTOMER_PHONE_EXISTS: &str = "CUSTOMER_PHONE_EXISTS";
-    pub const STORE_REQUIRED: &str = "STORE_REQUIRED";
     pub const BARCODE_EXISTS: &str = "BARCODE_EXISTS";
+    pub const PAYMENT_METHOD_EXISTS: &str = "PAYMENT_METHOD_EXISTS";
+    pub const SHIFT_ALREADY_OPEN: &str = "SHIFT_ALREADY_OPEN";
 }
 
 #[derive(Serialize)]

@@ -9,18 +9,9 @@ use crate::error::{codes, ApiError};
 use super::models::{NegativeStockPolicy, Posting, StockMovement};
 
 /**
- * Converts a quantity in any of a product's sale units to its base unit.
+ * The multiplier from one of a product's sale units to its base unit.
  * The base unit itself has factor 1; any other unit must be declared in `product_sale_units`, or the line is rejected rather than silently treated as the base unit (2 bags of 50kg must deduct 100, not 2).
  */
-pub async fn to_base_quantity(
-    conn: &mut PgConnection,
-    product_id: Uuid,
-    unit_id: Uuid,
-    quantity: Decimal,
-) -> Result<Decimal, ApiError> {
-    return Ok(quantity * unit_factor(conn, product_id, unit_id).await?);
-}
-
 pub async fn unit_factor(conn: &mut PgConnection, product_id: Uuid, unit_id: Uuid) -> Result<Decimal, ApiError> {
     let factor: Option<Decimal> = sqlx::query_scalar(
         "SELECT CASE WHEN p.base_unit_id = $2 THEN 1::numeric ELSE psu.factor_to_base END

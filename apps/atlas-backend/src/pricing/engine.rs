@@ -167,7 +167,6 @@ pub fn cash_rounding_adjustment(total: i64, increment: i64) -> i64 {
  * The refund owed for returning `quantity` of a line that sold `sold_quantity` for `line_total`.
  * Pro-rata on what the customer actually paid; when the return brings the line to fully returned, it's whatever is left of `line_total` after earlier refunds, so repeated partial returns can never leak or overpay a kobo through rounding.
  */
-#[allow(dead_code)]
 pub fn prorated_refund(line_total: i64, sold_quantity: Decimal, already_returned: Decimal, already_refunded: i64, quantity: Decimal) -> i64 {
     if already_returned + quantity >= sold_quantity {
         return line_total - already_refunded;

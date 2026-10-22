@@ -4,10 +4,7 @@
  * goes through `service::post`, so unit conversion, locking and the
  * negative-stock policy live in exactly one place.
  */
-// Checkout, voids and returns construct the remaining variants; until they land some of this is unused.
-#[allow(dead_code)]
 pub mod models;
-#[allow(dead_code)]
 pub mod service;
 
 pub use models::{MovementType, NegativeStockPolicy, Posting, PostingLine, StockMovement};
