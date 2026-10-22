@@ -313,6 +313,45 @@ async fn recording_a_payment_and_running_it_through_the_refund_flow_works(pool: 
     assert_eq!(status, StatusCode::OK);
     let shift_id = shift_body["data"]["id"].as_str().unwrap().to_string();
 
+    // The server prices the sale now, so the product needs a store listing and
+    // a price rule; the payment is part of checkout itself.
+    let (status, _) = send(
+        &router,
+        request_with_connect_info(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/products/{}/listings/{}", product_id, store_id))
+                .header("authorization", format!("Bearer {}", token)),
+            json!({ "is_active": true }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = post(
+        &router,
+        &format!("/api/v1/products/{}/price-rules", product_id),
+        Some(&token),
+        json!({ "unit_price_amount_minor": 1000 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, methods_body) = get(&router, "/api/v1/payment-methods", &token).await;
+    assert_eq!(status, StatusCode::OK);
+    let cash_method_id = methods_body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["code"] == "cash")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sqlx::query("UPDATE atlas.stores SET allow_negative_stock = true WHERE id = $1::uuid")
+        .bind(&store_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
     let sale_id = Uuid::now_v7().to_string();
     let (status, sale_body) = post(
         &router,
@@ -324,25 +363,15 @@ async fn recording_a_payment_and_running_it_through_the_refund_flow_works(pool: 
             "shift_id": shift_id,
             "customer_id": null,
             "device_id": "test-device",
-            "discount_amount_minor": 0,
-            "tax_amount_minor": 0,
-            "lines": [{ "product_id": product_id, "stock_item_id": null, "unit_id": unit_id.to_string(), "quantity": "1", "unit_price_amount_minor": 1000 }],
+            "lines": [{ "product_id": product_id, "stock_item_id": null, "unit_id": unit_id.to_string(), "quantity": "1" }],
+            "payments": [{ "payment_method_id": cash_method_id, "amount_minor": 1000 }],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{}", sale_body);
     assert_eq!(sale_body["data"]["id"], sale_id);
-
-    let (status, payment_body) = post(
-        &router,
-        "/api/v1/payments",
-        Some(&token),
-        json!({ "sale_id": sale_id, "method": "cash", "amount_minor": 1000, "currency": "NGN" }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let payment_id = payment_body["data"]["id"].as_str().unwrap().to_string();
-    assert_eq!(payment_body["data"]["status"], "succeeded");
+    let payment_id = sale_body["data"]["payments"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(sale_body["data"]["payments"][0]["status"], "succeeded");
 
     let (status, refund_request_body) = post(
         &router,

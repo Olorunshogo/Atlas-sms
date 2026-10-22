@@ -88,3 +88,60 @@ async fn purchase_history_needs_customer_history(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{}", body);
     assert_eq!(body["data"]["items"].as_array().unwrap().len(), 0);
 }
+
+#[sqlx::test]
+async fn fr19_history_for_manager_and_walk_in_sale_for_cashier(pool: PgPool) {
+    let router = build_router(pool.clone());
+    let (owner, tenant_id) = signup_owner(&router, &pool, "fr19-owner@example.com").await;
+    let lagos = create_store(&router, &owner, "lagos").await;
+    let abuja = create_store(&router, &owner, "abuja").await;
+    let each = seed_unit(&pool, tenant_id, "Each", "ea").await;
+    let soap = sellable(&router, &owner, lagos, each, "Soap", "SOAP", 500, "100").await;
+    list_at(&router, &owner, soap, abuja).await;
+    stock_up(&router, &owner, abuja, soap, "100").await;
+    let (_, cashier) = seed_staff(&pool, tenant_id, lagos, "cashier").await;
+    let (_, manager) = seed_staff(&pool, tenant_id, lagos, "store_manager").await;
+    let cash = method_id(&router, &owner, "cash").await;
+    let lagos_shift = open_shift(&router, &cashier, lagos).await;
+    let abuja_shift = open_shift(&router, &owner, abuja).await;
+
+    // A walk-in sale: no customer profile needed.
+    let walk_in = sale_request(lagos, lagos_shift, vec![cart_line(soap, each, "1")], vec![pay(cash, 500)]);
+    let (status, body) = post(&router, "/api/v1/sales", &as_user(&cashier), walk_in).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["customer_id"], serde_json::Value::Null);
+
+    let lagos_id = lagos.to_string();
+    let (status, body) = post(&router, "/api/v1/customers", &at_store(&cashier, &lagos_id), json!({ "full_name": "Chidi" })).await;
+    assert_eq!(status, StatusCode::OK);
+    let customer_id = id_of(&body);
+
+    for quantity in ["1", "2"] {
+        let mut request = sale_request(lagos, lagos_shift, vec![cart_line(soap, each, quantity)], vec![]);
+        request["customer_id"] = json!(customer_id);
+        let amount = if quantity == "1" { 500 } else { 1_000 };
+        request["payments"] = json!([pay(cash, amount)]);
+        let (status, body) = post(&router, "/api/v1/sales", &as_user(&cashier), request).await;
+        assert_eq!(status, StatusCode::OK, "{}", body);
+    }
+    // A sale at a store the Lagos manager has no grant at stays out of their view.
+    let mut abuja_sale = sale_request(abuja, abuja_shift, vec![cart_line(soap, each, "1")], vec![pay(cash, 500)]);
+    abuja_sale["customer_id"] = json!(customer_id);
+    let (status, body) = post(&router, "/api/v1/sales", &as_user(&owner), abuja_sale).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+
+    let path = format!("/api/v1/customers/{}/sales", customer_id);
+    let (status, body) = get(&router, &path, &at_store(&manager, &lagos_id)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let history = body["data"]["items"].as_array().unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(history.iter().all(|entry| entry["store_id"] == lagos_id));
+    assert_eq!(history[0]["total_amount_minor"], 1_000);
+
+    let (status, body) = get(&router, &path, &as_user(&owner)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["items"].as_array().unwrap().len(), 3);
+
+    let (status, _) = get(&router, &path, &at_store(&cashier, &lagos_id)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

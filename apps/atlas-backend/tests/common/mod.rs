@@ -353,3 +353,48 @@ pub async fn sellable(
     }
     return product_id;
 }
+
+// === Sale fixtures
+
+pub async fn open_shift(router: &Router, token: &str, store_id: Uuid) -> Uuid {
+    let (status, body) = post(router, "/api/v1/shifts", &as_user(token), json!({ "store_id": store_id, "opening_cash_amount_minor": 0 })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+/// The id of one of the tenant's payment methods by code (`cash`, `card`, `transfer`, `store_credit`).
+pub async fn method_id(router: &Router, token: &str, code: &str) -> Uuid {
+    let (status, body) = get(router, "/api/v1/payment-methods", &as_user(token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let id = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["code"] == code)
+        .unwrap_or_else(|| panic!("no payment method {}", code))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    return Uuid::parse_str(&id).unwrap();
+}
+
+pub fn cart_line(product_id: Uuid, unit_id: Uuid, quantity: &str) -> Value {
+    return json!({ "product_id": product_id, "unit_id": unit_id, "quantity": quantity });
+}
+
+pub fn pay(method_id: Uuid, amount_minor: i64) -> Value {
+    return json!({ "id": Uuid::now_v7(), "payment_method_id": method_id, "amount_minor": amount_minor });
+}
+
+/// A sale request body with a fresh client id; tweak the returned JSON for anything unusual.
+pub fn sale_request(store_id: Uuid, shift_id: Uuid, lines: Vec<Value>, payments: Vec<Value>) -> Value {
+    return json!({
+        "id": Uuid::now_v7(),
+        "store_id": store_id,
+        "shift_id": shift_id,
+        "customer_id": null,
+        "device_id": "till-1",
+        "lines": lines,
+        "payments": payments,
+    });
+}
