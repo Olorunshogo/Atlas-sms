@@ -131,6 +131,7 @@ pub struct StorePricing {
     pub cash_rounding_increment_minor: i64,
     pub max_cashier_discount_basis_points: i32,
     pub allow_negative_stock: bool,
+    pub allow_pay_later: bool,
 }
 
 // === Tax rates

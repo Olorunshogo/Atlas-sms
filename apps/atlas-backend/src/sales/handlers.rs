@@ -9,8 +9,9 @@ use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
 use crate::roles;
 
+use super::checkout::{self, CheckoutMode};
 use super::models::{
-    CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, Sale, SaleLine, Shift,
+    CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, Sale, SaleDetail, SaleLine, Shift, VoidSaleRequest,
 };
 use super::service;
 
@@ -99,13 +100,13 @@ pub async fn list_sales(
 
 /**
  * `POST /api/v1/sales`.
- * Requires `sale.create` at the store.
- * Idempotent by `body.id` - see `service::create_sale`'s doc comment; this is also the function the offline-sync endpoint calls.
+ * Requires `sale.create` at the store. Prices, discounts and tax are computed here, payments are checked against the amount due, and stock is taken through the inventory service - see `checkout::create_sale`.
+ * Idempotent by `body.id`, the same function the offline-sync endpoint calls.
  */
 pub async fn create_sale(
     mut tx: TenantTx,
     Json(body): Json<CreateSaleRequest>,
-) -> Result<Json<ApiEnvelope<Sale>>, ApiError> {
+) -> Result<Json<ApiEnvelope<SaleDetail>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
     roles::service::assert_permission(
@@ -116,9 +117,28 @@ pub async fn create_sale(
         "sale.create",
     )
     .await?;
-    let sale = service::create_sale(&mut tx, tenant_id, user_id, &body).await?;
+    let sale = checkout::create_sale(&mut tx, tenant_id, user_id, &body, CheckoutMode::Live).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Sale recorded.", sale)));
+}
+
+/**
+ * `POST /api/v1/sales/:id/void`.
+ * Requires `sale.void` at the sale's store. Same-shift cancellation only - see `service::void_sale`.
+ */
+pub async fn void_sale(
+    Path(sale_id): Path<Uuid>,
+    mut tx: TenantTx,
+    Json(body): Json<VoidSaleRequest>,
+) -> Result<Json<ApiEnvelope<Sale>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = crate::payments::service::sale_store_id(&mut tx, sale_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.void").await?;
+    let sale = service::void_sale(&mut tx, tenant_id, sale_id, user_id, &body.reason).await?;
+    audit::record(&mut tx, tenant_id, user_id, "sale", sale.id, "sale.void", serde_json::to_value(&sale).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Sale voided.", sale)));
 }
 
 /**

@@ -78,7 +78,7 @@ pub async fn effective_tax_rate(
 pub async fn load_store_pricing(conn: &mut PgConnection, store_id: Uuid) -> Result<StorePricing, ApiError> {
     return sqlx::query_as::<_, StorePricing>(
         "SELECT id, currency, is_active, prices_include_tax, default_tax_rate_id,
-                cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock
+                cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later
          FROM atlas.stores WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(store_id)

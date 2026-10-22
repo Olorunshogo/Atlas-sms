@@ -1,8 +1,9 @@
+pub mod checkout;
 mod handlers;
-mod models;
+pub mod models;
 pub mod service;
 
-pub use models::{CreateSaleRequest, Sale};
+pub use models::{CreateSaleRequest, SaleDetail};
 
 use axum::routing::{get, post};
 use axum::Router;
@@ -18,5 +19,6 @@ pub fn shifts_router() -> Router<AppState> {
 pub fn router() -> Router<AppState> {
     return Router::new()
         .route("/", get(handlers::list_sales).post(handlers::create_sale))
-        .route("/{id}/lines", get(handlers::list_sale_lines));
+        .route("/{id}/lines", get(handlers::list_sale_lines))
+        .route("/{id}/void", post(handlers::void_sale));
 }

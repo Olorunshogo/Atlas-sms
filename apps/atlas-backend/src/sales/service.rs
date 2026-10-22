@@ -1,17 +1,16 @@
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::audit;
-use crate::error::ApiError;
+use crate::error::{codes, ApiError};
 use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
+use crate::payments::service as payments;
 
-use super::models::{
-    CloseShiftRequest, CreateSaleRequest, OpenShiftRequest, Sale, SaleLine, Shift,
-};
+use super::models::{CloseShiftRequest, OpenShiftRequest, Sale, SaleDetail, SaleLine, Shift};
 
 // === Shifts
+
+const SHIFT_COLUMNS: &str = "id, store_id, opened_by_user_id, opened_at, opening_cash_amount_minor,
+     closed_by_user_id, closed_at, closing_cash_amount_minor, status::text AS status";
 
 pub async fn open_shift(
     conn: &mut PgConnection,
@@ -19,12 +18,12 @@ pub async fn open_shift(
     user_id: Uuid,
     payload: &OpenShiftRequest,
 ) -> Result<Shift, ApiError> {
-    return sqlx::query_as::<_, Shift>(
+    return sqlx::query_as::<_, Shift>(&format!(
         "INSERT INTO atlas.shifts (id, tenant_id, store_id, opened_by_user_id, opening_cash_amount_minor)
          VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, store_id, opened_by_user_id, opened_at, opening_cash_amount_minor,
-                   closed_by_user_id, closed_at, closing_cash_amount_minor, status::text AS status",
-    )
+         RETURNING {}",
+        SHIFT_COLUMNS
+    ))
     .bind(Uuid::now_v7())
     .bind(tenant_id)
     .bind(payload.store_id)
@@ -47,13 +46,13 @@ pub async fn close_shift(
     user_id: Uuid,
     payload: &CloseShiftRequest,
 ) -> Result<Shift, ApiError> {
-    return sqlx::query_as::<_, Shift>(
+    return sqlx::query_as::<_, Shift>(&format!(
         "UPDATE atlas.shifts
          SET status = 'closed', closed_by_user_id = $2, closed_at = now(), closing_cash_amount_minor = $3
          WHERE id = $1 AND status = 'open'
-         RETURNING id, store_id, opened_by_user_id, opened_at, opening_cash_amount_minor,
-                   closed_by_user_id, closed_at, closing_cash_amount_minor, status::text AS status",
-    )
+         RETURNING {}",
+        SHIFT_COLUMNS
+    ))
     .bind(shift_id)
     .bind(user_id)
     .bind(payload.closing_cash_amount_minor)
@@ -72,170 +71,158 @@ pub async fn shift_store_id(conn: &mut PgConnection, shift_id: Uuid) -> Result<U
 
 // === Sales
 
-/**
- * Idempotent by `payload.id` (client-generated) - both the direct `POST /api/v1/sales` path and the offline `POST /api/v1/sync/sales` path call this same function.
- * A sale synced twice (a flaky connection retried) finds its own id already present and returns it unchanged rather than double-charging stock.
- * Stock is only ever adjusted the first time a given sale id is accepted.
- */
-pub async fn create_sale(
-    conn: &mut PgConnection,
-    tenant_id: Uuid,
-    cashier_user_id: Uuid,
-    payload: &CreateSaleRequest,
-) -> Result<Sale, ApiError> {
-    if let Some(existing) = fetch_sale(conn, payload.id).await? {
-        return Ok(existing);
-    }
+pub const SALE_COLUMNS: &str = "s.id, s.store_id, s.shift_id, s.customer_id, s.cashier_user_id, s.device_id,
+     s.status::text AS status, s.currency, s.subtotal_amount_minor, s.discount_amount_minor,
+     s.cart_discount_amount_minor, s.discount_reason, s.tax_amount_minor, s.total_amount_minor,
+     s.rounding_adjustment_minor, s.amount_paid_minor, s.amount_refunded_minor,
+     s.payment_status::text AS payment_status, s.prices_include_tax, s.price_overridden, s.client_created_at,
+     s.created_at, s.completed_at, s.voided_at, s.voided_by_user_id, s.request_hash";
 
-    if payload.lines.is_empty() {
-        return Err(ApiError::bad_request("a sale must have at least one line"));
-    }
+const LINE_COLUMNS: &str = "id, sale_id, line_number, product_id, product_name, sku, stock_item_id, unit_id, unit_name,
+     quantity, base_quantity, list_unit_price_amount_minor, unit_price_amount_minor, price_rule_id, price_overridden,
+     price_override_reason, line_discount_amount_minor, allocated_cart_discount_amount_minor, discount_reason,
+     net_amount_minor, tax_rate_id, tax_rate_basis_points, tax_amount_minor, line_total_amount_minor";
 
-    let line_totals = payload
-        .lines
-        .iter()
-        .map(line_total_minor)
-        .collect::<Result<Vec<i64>, ApiError>>()?;
-    let subtotal: i64 = line_totals.iter().sum();
-    let total = subtotal - payload.discount_amount_minor + payload.tax_amount_minor;
+pub async fn find_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Option<Sale>, ApiError> {
+    return sqlx::query_as::<_, Sale>(&format!("SELECT {} FROM atlas.sales s WHERE s.id = $1", SALE_COLUMNS))
+        .bind(sale_id)
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::from);
+}
 
-    let sale = sqlx::query_as::<_, Sale>(
-        "INSERT INTO atlas.sales
-            (id, tenant_id, store_id, shift_id, customer_id, cashier_user_id, device_id,
-             subtotal_amount_minor, discount_amount_minor, tax_amount_minor, total_amount_minor, synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-         RETURNING id, store_id, shift_id, customer_id, cashier_user_id, device_id, status::text AS status,
-                   subtotal_amount_minor, discount_amount_minor, tax_amount_minor, total_amount_minor, created_at",
-    )
-    .bind(payload.id)
-    .bind(tenant_id)
-    .bind(payload.store_id)
-    .bind(payload.shift_id)
-    .bind(payload.customer_id)
-    .bind(cashier_user_id)
-    .bind(&payload.device_id)
-    .bind(subtotal)
-    .bind(payload.discount_amount_minor)
-    .bind(payload.tax_amount_minor)
-    .bind(total)
-    .fetch_one(&mut *conn)
-    .await?;
-
-    for (line, line_total) in payload.lines.iter().zip(line_totals) {
-        sqlx::query(
-            "INSERT INTO atlas.sale_lines
-                (id, tenant_id, sale_id, product_id, stock_item_id, unit_id, quantity, unit_price_amount_minor, line_total_amount_minor)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(tenant_id)
-        .bind(sale.id)
-        .bind(line.product_id)
-        .bind(line.stock_item_id)
-        .bind(line.unit_id)
-        .bind(line.quantity)
-        .bind(line.unit_price_amount_minor)
-        .bind(line_total)
-        .execute(&mut *conn)
-        .await?;
-    }
-
-    // Interim: routed through the inventory service so the ledger has one
-    // writer; the checkout rewrite replaces this whole function.
-    let posting_lines: Vec<PostingLine> = payload
-        .lines
-        .iter()
-        .map(|line| PostingLine {
-            product_id: line.product_id,
-            stock_item_id: line.stock_item_id,
-            unit_id: Some(line.unit_id),
-            quantity: line.quantity,
-        })
-        .collect();
-    inventory::service::post(
-        conn,
-        Posting {
-            tenant_id,
-            store_id: payload.store_id,
-            movement_type: MovementType::Sale,
-            reason: "Sale",
-            reference_id: Some(sale.id),
-            actor_user_id: cashier_user_id,
-            policy: NegativeStockPolicy::Allow,
-            source: "sale",
-            lines: &posting_lines,
-        },
-    )
-    .await?;
-
-    // Written here rather than by each of this function's two callers
-    // (`sales::handlers::create_sale`, `sync::handlers::sync_sale`) so it
-    // can sit after the idempotency check above - a retried/duplicate sync
-    // returns early and never reaches this line, so it can't double-audit
-    // a sale that was really only created once.
-    audit::record(
-        conn,
-        tenant_id,
-        cashier_user_id,
-        "sale",
-        sale.id,
-        "sale.create",
-        serde_json::to_value(&sale).ok(),
-    )
-    .await?;
-
-    return Ok(sale);
+pub async fn get_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Sale, ApiError> {
+    return find_sale(conn, sale_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Sale not found."));
 }
 
 /**
- * Proper decimal money arithmetic, not integer truncation of `quantity` - a 0.5kg line at a unit price still needs to bill half, not zero.
- * Rounds to the nearest minor unit (kobo/cent) since the ledger's smallest representable amount is one.
+ * Takes the sale's row lock - the first lock in the documented order (sale row, then sequence rows, then inventory advisory locks) - so payments, voids, returns and refunds against one sale serialise instead of each passing its checks against stale totals.
  */
-fn line_total_minor(line: &super::models::SaleLineInput) -> Result<i64, ApiError> {
-    let total = (Decimal::from(line.unit_price_amount_minor) * line.quantity).round();
-    return total
-        .to_i64()
-        .ok_or_else(|| ApiError::bad_request("line total out of range"));
-}
-
-async fn fetch_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Option<Sale>, ApiError> {
-    return sqlx::query_as::<_, Sale>(
-        "SELECT id, store_id, shift_id, customer_id, cashier_user_id, device_id, status::text AS status,
-                subtotal_amount_minor, discount_amount_minor, tax_amount_minor, total_amount_minor, created_at
-         FROM atlas.sales WHERE id = $1",
-    )
+pub async fn lock_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Sale, ApiError> {
+    return sqlx::query_as::<_, Sale>(&format!(
+        "SELECT {} FROM atlas.sales s WHERE s.id = $1 FOR UPDATE",
+        SALE_COLUMNS
+    ))
     .bind(sale_id)
     .fetch_optional(conn)
-    .await
-    .map_err(ApiError::from);
+    .await?
+    .ok_or_else(|| ApiError::not_found("Sale not found."));
 }
 
-pub async fn list_sales_for_shift(
-    conn: &mut PgConnection,
-    shift_id: Uuid,
-) -> Result<Vec<Sale>, ApiError> {
-    return sqlx::query_as::<_, Sale>(
-        "SELECT id, store_id, shift_id, customer_id, cashier_user_id, device_id, status::text AS status,
-                subtotal_amount_minor, discount_amount_minor, tax_amount_minor, total_amount_minor, created_at
-         FROM atlas.sales WHERE shift_id = $1 ORDER BY created_at",
-    )
+pub async fn sale_detail(conn: &mut PgConnection, sale: Sale) -> Result<SaleDetail, ApiError> {
+    let lines = list_sale_lines(conn, sale.id).await?;
+    let payments = payments::list_payments_for_sale(conn, sale.id).await?;
+    return Ok(SaleDetail { sale, lines, payments });
+}
+
+pub async fn list_sales_for_shift(conn: &mut PgConnection, shift_id: Uuid) -> Result<Vec<Sale>, ApiError> {
+    return sqlx::query_as::<_, Sale>(&format!(
+        "SELECT {} FROM atlas.sales s WHERE s.shift_id = $1 ORDER BY s.created_at",
+        SALE_COLUMNS
+    ))
     .bind(shift_id)
     .fetch_all(conn)
     .await
     .map_err(ApiError::from);
 }
 
-pub async fn list_sale_lines(
-    conn: &mut PgConnection,
-    sale_id: Uuid,
-) -> Result<Vec<SaleLine>, ApiError> {
-    return sqlx::query_as::<_, SaleLine>(
-        "SELECT id, sale_id, product_id, stock_item_id, unit_id, quantity,
-                unit_price_amount_minor, line_total_amount_minor
-         FROM atlas.sale_lines WHERE sale_id = $1 ORDER BY id",
-    )
+pub async fn list_sale_lines(conn: &mut PgConnection, sale_id: Uuid) -> Result<Vec<SaleLine>, ApiError> {
+    return sqlx::query_as::<_, SaleLine>(&format!(
+        "SELECT {} FROM atlas.sale_lines WHERE sale_id = $1 ORDER BY line_number, id",
+        LINE_COLUMNS
+    ))
     .bind(sale_id)
     .fetch_all(conn)
     .await
     .map_err(ApiError::from);
+}
+
+/**
+ * Cancels a sale on the day it happened: puts its stock back (`sale_void` movements), reverses every live payment, and marks it `voided`.
+ * Only while its shift is still open and before anything has been returned against it - after that, money and goods move through a return instead, so the paper trail matches what physically happened.
+ */
+pub async fn void_sale(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    sale_id: Uuid,
+    actor_user_id: Uuid,
+    reason: &str,
+) -> Result<Sale, ApiError> {
+    if reason.trim().is_empty() {
+        return Err(ApiError::bad_request("a void needs a reason"));
+    }
+    let sale = lock_sale(conn, sale_id).await?;
+    if sale.status != "completed" && sale.status != "awaiting_payment" {
+        return Err(ApiError::conflict_with_code("Only a completed or awaiting-payment sale can be voided.", codes::SALE_NOT_VOIDABLE));
+    }
+    let shift_open: bool = sqlx::query_scalar("SELECT status = 'open' FROM atlas.shifts WHERE id = $1")
+        .bind(sale.shift_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    if !shift_open {
+        return Err(ApiError::conflict_with_code(
+            "This sale's shift is closed; take the goods back as a return instead.",
+            codes::SALE_NOT_VOIDABLE,
+        ));
+    }
+    if sale.amount_refunded_minor > 0 {
+        return Err(ApiError::conflict_with_code(
+            "Part of this sale has already been refunded; it can no longer be voided.",
+            codes::SALE_NOT_VOIDABLE,
+        ));
+    }
+
+    if sale.status == "completed" {
+        let lines = list_sale_lines(conn, sale_id).await?;
+        let posting_lines: Vec<PostingLine> = lines
+            .iter()
+            .map(|line| PostingLine {
+                product_id: line.product_id,
+                stock_item_id: line.stock_item_id,
+                unit_id: Some(line.unit_id),
+                quantity: line.quantity,
+            })
+            .collect();
+        inventory::service::post(
+            conn,
+            Posting {
+                tenant_id,
+                store_id: sale.store_id,
+                movement_type: MovementType::SaleVoid,
+                reason,
+                reference_id: Some(sale_id),
+                actor_user_id,
+                policy: NegativeStockPolicy::Allow,
+                source: "sale_void",
+                lines: &posting_lines,
+            },
+        )
+        .await?;
+    }
+
+    sqlx::query(
+        "UPDATE atlas.payments
+         SET status = CASE WHEN status = 'pending' THEN 'failed'::atlas.payment_status ELSE 'reversed'::atlas.payment_status END,
+             status_reason = $2, updated_at = now()
+         WHERE sale_id = $1 AND status IN ('pending', 'succeeded')",
+    )
+    .bind(sale_id)
+    .bind(format!("Sale voided: {}", reason.trim()))
+    .execute(&mut *conn)
+    .await?;
+
+    sqlx::query(
+        "UPDATE atlas.sales
+         SET status = 'voided', voided_at = now(), voided_by_user_id = $2,
+             amount_paid_minor = 0, payment_status = 'unpaid'
+         WHERE id = $1",
+    )
+    .bind(sale_id)
+    .bind(actor_user_id)
+    .execute(&mut *conn)
+    .await?;
+
+    return get_sale(conn, sale_id).await;
 }
