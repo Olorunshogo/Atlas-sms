@@ -9,49 +9,68 @@ use crate::response::ApiEnvelope;
 use crate::roles;
 
 use super::models::{
-    ConfirmRefundRequest, CreatePaymentRequest, ListPaymentsQuery, Payment, Refund,
-    RefundRequestedData, RequestRefundRequest,
+    ConfirmRefundRequest, CreatePaymentMethodRequest, ListPaymentsQuery, Payment, PaymentMethod, Refund,
+    RefundRequestedData, RequestRefundRequest, UpdatePaymentMethodRequest,
 };
 use super::service;
 
 /**
  * `GET /api/v1/payments?sale_id=`.
- * Tenant-wide visibility, same reasoning as `stores`/`products`.
+ * Requires `sale.create` at the sale's store.
  */
 pub async fn list_payments(
     mut tx: TenantTx,
     Query(query): Query<ListPaymentsQuery>,
 ) -> Result<Json<ApiEnvelope<Vec<Payment>>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::sale_store_id(&mut tx, query.sale_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.create").await?;
     let payments = service::list_payments_for_sale(&mut tx, query.sale_id).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Payments fetched.", payments)));
 }
 
+// === Payment methods
+
+/// `GET /api/v1/payment-methods`. Any tenant member - every till lists them at checkout.
+pub async fn list_methods(mut tx: TenantTx) -> Result<Json<ApiEnvelope<Vec<PaymentMethod>>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let methods = service::list_methods(&mut tx, tenant_id).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Payment methods fetched.", methods)));
+}
+
 /**
- * `POST /api/v1/payments`.
- * Requires `sale.create` at the sale's own store.
+ * `POST /api/v1/payment-methods`.
+ * Requires `store.update` tenant-wide: payment methods are shared by every store, so configuring one is not a single-branch decision.
  */
-pub async fn create_payment(
+pub async fn create_method(
     mut tx: TenantTx,
-    Json(body): Json<CreatePaymentRequest>,
-) -> Result<Json<ApiEnvelope<Payment>>, ApiError> {
+    Json(body): Json<CreatePaymentMethodRequest>,
+) -> Result<Json<ApiEnvelope<PaymentMethod>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
-    let store_id = service::sale_store_id(&mut tx, body.sale_id).await?;
-    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.create").await?;
-    let payment = service::create_payment(&mut tx, tenant_id, &body).await?;
-    audit::record(
-        &mut tx,
-        tenant_id,
-        user_id,
-        "payment",
-        payment.id,
-        "payment.create",
-        serde_json::to_value(&payment).ok(),
-    )
-    .await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "store.update").await?;
+    let method = service::create_method(&mut tx, tenant_id, &body).await?;
+    audit::record(&mut tx, tenant_id, user_id, "payment_method", method.id, "payment_method.create", serde_json::to_value(&method).ok()).await?;
     tx.commit().await?;
-    return Ok(Json(ApiEnvelope::ok("Payment recorded.", payment)));
+    return Ok(Json(ApiEnvelope::ok("Payment method created.", method)));
+}
+
+/// `PATCH /api/v1/payment-methods/:id`. Same gate as create.
+pub async fn update_method(
+    Path(method_id): Path<Uuid>,
+    mut tx: TenantTx,
+    Json(body): Json<UpdatePaymentMethodRequest>,
+) -> Result<Json<ApiEnvelope<PaymentMethod>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "store.update").await?;
+    let method = service::update_method(&mut tx, method_id, &body).await?;
+    audit::record(&mut tx, tenant_id, user_id, "payment_method", method.id, "payment_method.update", serde_json::to_value(&method).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Payment method updated.", method)));
 }
 
 /**

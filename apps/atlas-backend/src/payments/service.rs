@@ -3,9 +3,11 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::crypto;
-use crate::error::ApiError;
+use crate::error::{codes, ApiError};
 
-use super::models::{CreatePaymentRequest, Payment, Refund};
+use super::models::{
+    CreatePaymentMethodRequest, Payment, PaymentMethod, Refund, UpdatePaymentMethodRequest,
+};
 
 /// How long a refund's confirmation token is valid before it must be re-requested - long enough for a cashier to double-check with a manager, short enough that a token left on screen doesn't stay a live "execute this refund" button indefinitely.
 const CONFIRMATION_WINDOW_MINUTES: i64 = 15;
@@ -46,43 +48,192 @@ pub async fn refund_store_id(conn: &mut PgConnection, refund_id: Uuid) -> Result
     .ok_or_else(|| ApiError::bad_request("Unknown refund."));
 }
 
-pub async fn create_payment(
-    conn: &mut PgConnection,
-    tenant_id: Uuid,
-    payload: &CreatePaymentRequest,
-) -> Result<Payment, ApiError> {
-    // Recorded as 'succeeded' immediately - v1 has no payment gateway to
-    // wait on a callback from, only in-person methods a cashier already
-    // confirmed by the time this call happens. 'pending'/'failed' stay in
-    // the enum for whenever a real gateway integration needs them.
-    return sqlx::query_as::<_, Payment>(
-        "INSERT INTO atlas.payments (id, tenant_id, sale_id, method, amount_minor, currency, status)
-         VALUES ($1, $2, $3, $4::atlas.payment_method, $5, $6, 'succeeded')
-         RETURNING id, sale_id, method::text AS method, amount_minor, currency, status::text AS status",
-    )
-    .bind(Uuid::now_v7())
+// === Payment methods
+
+const METHOD_COLUMNS: &str = "id, code, name, kind::text AS kind, requires_reference, is_active, sort_order";
+
+/// The default set every new tenant starts with; migration 20261022000032 seeded the same for tenants that already existed.
+pub async fn seed_default_methods(conn: &mut PgConnection, tenant_id: Uuid) -> Result<(), ApiError> {
+    let defaults = [
+        ("cash", "Cash", "cash", false, 1),
+        ("card", "Card", "card", false, 2),
+        ("transfer", "Bank transfer", "transfer", true, 3),
+        ("store_credit", "Store credit", "store_credit", false, 4),
+    ];
+    for (code, name, kind, requires_reference, sort_order) in defaults {
+        sqlx::query(
+            "INSERT INTO atlas.payment_methods (id, tenant_id, code, name, kind, requires_reference, sort_order)
+             VALUES ($1, $2, $3, $4, $5::atlas.payment_method, $6, $7)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(tenant_id)
+        .bind(code)
+        .bind(name)
+        .bind(kind)
+        .bind(requires_reference)
+        .bind(sort_order)
+        .execute(&mut *conn)
+        .await?;
+    }
+    return Ok(());
+}
+
+pub async fn list_methods(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Vec<PaymentMethod>, ApiError> {
+    return sqlx::query_as::<_, PaymentMethod>(&format!(
+        "SELECT {} FROM atlas.payment_methods WHERE tenant_id = $1 ORDER BY sort_order, name",
+        METHOD_COLUMNS
+    ))
     .bind(tenant_id)
-    .bind(payload.sale_id)
-    .bind(&payload.method)
-    .bind(payload.amount_minor)
-    .bind(&payload.currency)
-    .fetch_one(conn)
+    .fetch_all(conn)
     .await
     .map_err(ApiError::from);
+}
+
+pub async fn create_method(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    payload: &CreatePaymentMethodRequest,
+) -> Result<PaymentMethod, ApiError> {
+    return sqlx::query_as::<_, PaymentMethod>(&format!(
+        "INSERT INTO atlas.payment_methods (id, tenant_id, code, name, kind, requires_reference, sort_order)
+         VALUES ($1, $2, $3, $4, $5::atlas.payment_method, $6, $7)
+         RETURNING {}",
+        METHOD_COLUMNS
+    ))
+    .bind(Uuid::now_v7())
+    .bind(tenant_id)
+    .bind(payload.code.trim())
+    .bind(payload.name.trim())
+    .bind(&payload.kind)
+    .bind(payload.requires_reference)
+    .bind(payload.sort_order)
+    .fetch_one(conn)
+    .await
+    .map_err(|err| match err {
+        sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
+            ApiError::conflict_with_code("A payment method with that code already exists.", "PAYMENT_METHOD_EXISTS")
+        }
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("22P02") => {
+            ApiError::bad_request("kind must be one of cash, card, transfer, wallet, store_credit, other")
+        }
+        other => ApiError::from(other),
+    });
+}
+
+pub async fn update_method(
+    conn: &mut PgConnection,
+    method_id: Uuid,
+    payload: &UpdatePaymentMethodRequest,
+) -> Result<PaymentMethod, ApiError> {
+    return sqlx::query_as::<_, PaymentMethod>(&format!(
+        "UPDATE atlas.payment_methods
+         SET name = COALESCE($2, name), requires_reference = COALESCE($3, requires_reference),
+             is_active = COALESCE($4, is_active), sort_order = COALESCE($5, sort_order)
+         WHERE id = $1
+         RETURNING {}",
+        METHOD_COLUMNS
+    ))
+    .bind(method_id)
+    .bind(&payload.name)
+    .bind(payload.requires_reference)
+    .bind(payload.is_active)
+    .bind(payload.sort_order)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Payment method not found."));
+}
+
+/// An active payment method of this tenant (RLS already limits it to the tenant).
+pub async fn active_method(conn: &mut PgConnection, method_id: Uuid) -> Result<PaymentMethod, ApiError> {
+    return sqlx::query_as::<_, PaymentMethod>(&format!(
+        "SELECT {} FROM atlas.payment_methods WHERE id = $1 AND is_active",
+        METHOD_COLUMNS
+    ))
+    .bind(method_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::bad_request_with_code("Unknown or inactive payment method.", codes::PAYMENT_METHOD_INVALID));
+}
+
+// === Payments
+
+pub const PAYMENT_SELECT: &str = "SELECT p.id, p.sale_id, p.payment_method_id, p.method::text AS method,
+            COALESCE(pm.name, p.method::text) AS method_name, p.amount_minor, p.tendered_amount_minor,
+            p.change_amount_minor, p.refunded_amount_minor, p.currency, p.status::text AS status,
+            p.reference, p.status_reason, p.created_at, p.processed_at
+     FROM atlas.payments p
+     LEFT JOIN atlas.payment_methods pm ON pm.id = p.payment_method_id";
+
+pub struct NewPayment<'a> {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub sale_id: Uuid,
+    pub shift_id: Uuid,
+    pub method: &'a PaymentMethod,
+    pub amount_minor: i64,
+    pub tendered_amount_minor: Option<i64>,
+    pub change_amount_minor: i64,
+    pub currency: &'a str,
+    pub status: &'a str,
+    pub reference: Option<&'a str>,
+    pub received_by_user_id: Uuid,
+}
+
+pub async fn insert_payment(conn: &mut PgConnection, payment: NewPayment<'_>) -> Result<Payment, ApiError> {
+    sqlx::query(
+        "INSERT INTO atlas.payments
+            (id, tenant_id, sale_id, shift_id, payment_method_id, method, amount_minor, tendered_amount_minor,
+             change_amount_minor, currency, status, reference, received_by_user_id, processed_at)
+         VALUES ($1, $2, $3, $4, $5, $6::atlas.payment_method, $7, $8, $9, $10, $11::atlas.payment_status, $12, $13,
+                 CASE WHEN $11 = 'succeeded' THEN now() END)",
+    )
+    .bind(payment.id)
+    .bind(payment.tenant_id)
+    .bind(payment.sale_id)
+    .bind(payment.shift_id)
+    .bind(payment.method.id)
+    .bind(&payment.method.kind)
+    .bind(payment.amount_minor)
+    .bind(payment.tendered_amount_minor)
+    .bind(payment.change_amount_minor)
+    .bind(payment.currency)
+    .bind(payment.status)
+    .bind(payment.reference)
+    .bind(payment.received_by_user_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|err| match err {
+        sqlx::Error::Database(db_err) if db_err.constraint() == Some("payments_reference_unique_idx") => {
+            ApiError::conflict_with_code(
+                "A live payment with this reference is already recorded.",
+                codes::DUPLICATE_PAYMENT_REFERENCE,
+            )
+        }
+        sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
+            ApiError::conflict_with_code("A payment with this id already exists.", codes::IDEMPOTENCY_CONFLICT)
+        }
+        other => ApiError::from(other),
+    })?;
+    return get_payment(conn, payment.id).await;
+}
+
+pub async fn get_payment(conn: &mut PgConnection, payment_id: Uuid) -> Result<Payment, ApiError> {
+    return sqlx::query_as::<_, Payment>(&format!("{} WHERE p.id = $1", PAYMENT_SELECT))
+        .bind(payment_id)
+        .fetch_optional(conn)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Payment not found."));
 }
 
 pub async fn list_payments_for_sale(
     conn: &mut PgConnection,
     sale_id: Uuid,
 ) -> Result<Vec<Payment>, ApiError> {
-    return sqlx::query_as::<_, Payment>(
-        "SELECT id, sale_id, method::text AS method, amount_minor, currency, status::text AS status
-         FROM atlas.payments WHERE sale_id = $1 ORDER BY created_at",
-    )
-    .bind(sale_id)
-    .fetch_all(conn)
-    .await
-    .map_err(ApiError::from);
+    return sqlx::query_as::<_, Payment>(&format!("{} WHERE p.sale_id = $1 ORDER BY p.created_at, p.id", PAYMENT_SELECT))
+        .bind(sale_id)
+        .fetch_all(conn)
+        .await
+        .map_err(ApiError::from);
 }
 
 /**

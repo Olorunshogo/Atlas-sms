@@ -80,6 +80,7 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/tax-rates", API_PREFIX), pricing::tax_rates_router())
         .nest(&format!("{}/customers", API_PREFIX), customers::router())
         .nest(&format!("{}/payments", API_PREFIX), payments::router())
+        .nest(&format!("{}/payment-methods", API_PREFIX), payments::methods_router())
         .nest(&format!("{}/suppliers", API_PREFIX), purchasing::suppliers_router())
         .nest(&format!("{}/purchase-orders", API_PREFIX), purchasing::purchase_orders_router())
         .nest(&format!("{}/roles", API_PREFIX), roles::router())

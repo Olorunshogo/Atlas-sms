@@ -90,6 +90,8 @@ pub async fn signup(
     .execute(&mut *tx)
     .await?;
 
+    crate::payments::service::seed_default_methods(&mut tx, tenant_id).await?;
+
     sqlx::query(
         "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, status, granted_by_user_id)
          VALUES ($1, $2, $3, 'tenant', $4, 'pending', $2)",

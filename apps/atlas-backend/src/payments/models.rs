@@ -1,23 +1,56 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct Payment {
     pub id: Uuid,
     pub sale_id: Uuid,
+    pub payment_method_id: Option<Uuid>,
+    /// The method's kind (`cash`, `card`, `transfer`, ...); `method_name` is the tenant's label for it.
     pub method: String,
+    pub method_name: String,
     pub amount_minor: i64,
+    pub tendered_amount_minor: Option<i64>,
+    pub change_amount_minor: i64,
+    pub refunded_amount_minor: i64,
     pub currency: String,
     pub status: String,
+    pub reference: Option<String>,
+    pub status_reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub processed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct PaymentMethod {
+    pub id: Uuid,
+    pub code: String,
+    pub name: String,
+    pub kind: String,
+    pub requires_reference: bool,
+    pub is_active: bool,
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreatePaymentRequest {
-    pub sale_id: Uuid,
-    /// `cash` | `card` | `transfer` | `wallet` - matches `atlas.payment_method`.
-    pub method: String,
-    pub amount_minor: i64,
-    pub currency: String,
+pub struct CreatePaymentMethodRequest {
+    pub code: String,
+    pub name: String,
+    /// `cash` | `card` | `transfer` | `wallet` | `store_credit` | `other` - matches `atlas.payment_method`.
+    pub kind: String,
+    #[serde(default)]
+    pub requires_reference: bool,
+    #[serde(default)]
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePaymentMethodRequest {
+    pub name: Option<String>,
+    pub requires_reference: Option<bool>,
+    pub is_active: Option<bool>,
+    pub sort_order: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
