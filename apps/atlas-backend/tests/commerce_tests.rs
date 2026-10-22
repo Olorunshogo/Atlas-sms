@@ -185,7 +185,7 @@ async fn registering_and_listing_a_customer_works(pool: PgPool) {
 
     let (status, list_body) = get(&router, "/api/v1/customers", &token).await;
     assert_eq!(status, StatusCode::OK);
-    let customers = list_body["data"].as_array().unwrap();
+    let customers = list_body["data"]["items"].as_array().unwrap();
     assert!(customers.iter().any(|c| c["id"] == customer_id));
 
     // Partial update - only phone changes, full_name is left alone.
