@@ -47,7 +47,10 @@ pub async fn open_shift(
     return Ok(Json(ApiEnvelope::ok("Shift opened.", shift)));
 }
 
-/// `POST /api/v1/shifts/:id/close`.
+/**
+ * `POST /api/v1/shifts/:id/close`.
+ * Requires `sale.create` at the shift's own store - the same gate as opening it.
+ */
 pub async fn close_shift(
     Path(shift_id): Path<Uuid>,
     mut tx: TenantTx,
@@ -55,6 +58,8 @@ pub async fn close_shift(
 ) -> Result<Json<ApiEnvelope<Shift>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
+    let store_id = service::shift_store_id(&mut tx, shift_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.create").await?;
     let shift = service::close_shift(&mut tx, shift_id, user_id, &body).await?;
     audit::record(
         &mut tx,
@@ -75,11 +80,18 @@ pub struct ListSalesQuery {
     pub shift_id: Uuid,
 }
 
-/// `GET /api/v1/sales?shift_id=`.
+/**
+ * `GET /api/v1/sales?shift_id=`.
+ * Requires `sale.create` at the shift's store - the till's own running list.
+ */
 pub async fn list_sales(
     mut tx: TenantTx,
     Query(query): Query<ListSalesQuery>,
 ) -> Result<Json<ApiEnvelope<Vec<Sale>>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::shift_store_id(&mut tx, query.shift_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.create").await?;
     let sales = service::list_sales_for_shift(&mut tx, query.shift_id).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Sales fetched.", sales)));
@@ -109,11 +121,18 @@ pub async fn create_sale(
     return Ok(Json(ApiEnvelope::ok("Sale recorded.", sale)));
 }
 
-/// `GET /api/v1/sales/:id/lines`.
+/**
+ * `GET /api/v1/sales/:id/lines`.
+ * Requires `sale.create` at the sale's store.
+ */
 pub async fn list_sale_lines(
     Path(sale_id): Path<Uuid>,
     mut tx: TenantTx,
 ) -> Result<Json<ApiEnvelope<Vec<SaleLine>>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = crate::payments::service::sale_store_id(&mut tx, sale_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.create").await?;
     let lines = service::list_sale_lines(&mut tx, sale_id).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Sale lines fetched.", lines)));

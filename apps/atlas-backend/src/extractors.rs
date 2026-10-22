@@ -25,11 +25,10 @@ pub struct TenantTx {
     tx: Transaction<'static, Postgres>,
     pub user_id: Uuid,
     pub tenant_id: Uuid,
-    // Not read by any handler yet - every current mutation takes its store
-    // id from the request body instead (see stock::handlers, sales::handlers).
-    // Kept for a future "default store view" GET endpoint that trusts the
-    // header rather than a query param.
-    #[allow(dead_code)]
+    /**
+     * Mutations still take their store from the body or the entity they touch.
+     * Tenant-level resources with no store of their own (customers) check permissions against this, so a store-scoped grant can match.
+     */
     pub store_id: Option<Uuid>,
 }
 

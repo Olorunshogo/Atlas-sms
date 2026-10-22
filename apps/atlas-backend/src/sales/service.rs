@@ -61,6 +61,14 @@ pub async fn close_shift(
     .ok_or_else(|| ApiError::bad_request("Shift not found or already closed."));
 }
 
+pub async fn shift_store_id(conn: &mut PgConnection, shift_id: Uuid) -> Result<Uuid, ApiError> {
+    return sqlx::query_scalar("SELECT store_id FROM atlas.shifts WHERE id = $1")
+        .bind(shift_id)
+        .fetch_optional(conn)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Shift not found."));
+}
+
 // === Sales
 
 /**

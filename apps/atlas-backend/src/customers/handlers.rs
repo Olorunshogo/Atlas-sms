@@ -13,13 +13,16 @@ use super::service;
 
 /**
  * `GET /api/v1/customers?query=`.
- * Tenant-wide visibility, same reasoning as `stores`/`products` - no permission check beyond being a member of the tenant.
+ * Requires `customer.view`, checked against the caller's current store (`x-store-id`) so a store-scoped cashier's grant can match.
  */
 pub async fn list_customers(
     mut tx: TenantTx,
     Query(query): Query<ListCustomersQuery>,
 ) -> Result<Json<ApiEnvelope<Vec<Customer>>>, ApiError> {
     let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = tx.store_id;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, store_id, "customer.view").await?;
     let customers = service::list_customers(&mut tx, tenant_id, query.query.as_deref()).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Customers fetched.", customers)));
@@ -27,7 +30,7 @@ pub async fn list_customers(
 
 /**
  * `POST /api/v1/customers`.
- * Gated on `sale.create`, not a dedicated customer permission (none exists in the permission enum today) - registering a customer is routinely a cashier action at checkout, not a management one, so it rides on the same permission that lets them ring up the sale.
+ * Requires `customer.manage` at the caller's current store - cashiers hold it, since registering a customer is routinely a checkout action.
  */
 pub async fn create_customer(
     mut tx: TenantTx,
@@ -35,7 +38,8 @@ pub async fn create_customer(
 ) -> Result<Json<ApiEnvelope<Customer>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
-    roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "sale.create").await?;
+    let store_id = tx.store_id;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, store_id, "customer.manage").await?;
     let customer = service::create_customer(
         &mut tx,
         tenant_id,
@@ -61,7 +65,7 @@ pub async fn create_customer(
 
 /**
  * `PATCH /api/v1/customers/:id`.
- * Same `sale.create` reasoning as create.
+ * Same `customer.manage` gate as create.
  */
 pub async fn update_customer(
     Path(customer_id): Path<Uuid>,
@@ -70,7 +74,8 @@ pub async fn update_customer(
 ) -> Result<Json<ApiEnvelope<Customer>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
-    roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "sale.create").await?;
+    let store_id = tx.store_id;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, store_id, "customer.manage").await?;
     let customer = service::update_customer(&mut tx, customer_id, &body).await?;
     audit::record(
         &mut tx,

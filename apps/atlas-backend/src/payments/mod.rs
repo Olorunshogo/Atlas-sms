@@ -1,6 +1,6 @@
 mod handlers;
 mod models;
-mod service;
+pub mod service;
 
 use axum::routing::{get, post};
 use axum::Router;
