@@ -240,3 +240,35 @@ pub async fn create_product(router: &Router, token: &str, base_unit_id: Uuid, na
     assert_eq!(status, StatusCode::OK, "{}", body);
     return Uuid::parse_str(&id_of(&body)).unwrap();
 }
+
+// === Stock fixtures
+
+/// Puts `quantity` base units on hand through the real adjustment endpoint (so it goes through the inventory service).
+pub async fn stock_up(router: &Router, token: &str, store_id: Uuid, product_id: Uuid, quantity: &str) {
+    let (status, body) = post(
+        router,
+        "/api/v1/stock/adjustments",
+        &as_user(token),
+        json!({
+            "store_id": store_id,
+            "product_id": product_id,
+            "stock_item_id": null,
+            "quantity": quantity,
+            "reason": "Opening count",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+pub async fn on_hand(router: &Router, token: &str, store_id: Uuid, product_id: Uuid) -> String {
+    let (status, body) = get(router, &format!("/api/v1/stock/on-hand?store_id={}", store_id), &as_user(token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|level| level["product_id"] == product_id.to_string())
+        .map(|level| level["on_hand"].as_str().unwrap().to_string())
+        .unwrap_or_else(|| "0".to_string());
+}
