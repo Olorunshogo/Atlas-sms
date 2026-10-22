@@ -125,7 +125,7 @@ pub async fn update_method(
 
 /**
  * `POST /api/v1/payments/:id/refund`.
- * Requires `sale.refund` at the payment's own store - the first half of the two-step confirm flow, see `service::request_refund`'s doc comment.
+ * Requires `sale.refund` at the payment's own store - the first half of the two-step confirm flow for a refund that isn't tied to returned goods, see `service::request_refund`'s doc comment. Goods coming back go through `POST /sales/:id/returns` instead.
  * The raw confirmation token is returned directly to the caller (a staff member at the till, not the customer's email) - there's nowhere else it needs to go.
  */
 pub async fn request_refund(
@@ -138,7 +138,7 @@ pub async fn request_refund(
     let store_id = service::payment_store_id(&mut tx, payment_id).await?;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.refund").await?;
     let (refund, confirmation_token) =
-        service::request_refund(&mut tx, tenant_id, payment_id, body.amount_minor, user_id).await?;
+        service::request_refund(&mut tx, tenant_id, payment_id, body.amount_minor, &body.reason, user_id).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -169,7 +169,7 @@ pub async fn confirm_refund(
     let user_id = tx.user_id;
     let store_id = service::refund_store_id(&mut tx, refund_id).await?;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "sale.refund").await?;
-    let refund = service::confirm_refund(&mut tx, refund_id, &body.confirmation_token).await?;
+    let refund = service::confirm_refund(&mut tx, refund_id, &body.confirmation_token, user_id).await?;
     audit::record(
         &mut tx,
         tenant_id,

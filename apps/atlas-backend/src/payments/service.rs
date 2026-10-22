@@ -32,14 +32,13 @@ pub async fn payment_store_id(conn: &mut PgConnection, payment_id: Uuid) -> Resu
 }
 
 /**
- * Same idea, one join further - the store a refund's own permission check is scoped to.
+ * The store a refund's own permission check is scoped to.
  * A store-scoped `sale.refund` grant must be checked against this, not `None`/tenant-wide - `assert_permission`'s SQL never matches a store-scope grant when `store_id` is `None`, so passing `None` here would silently exclude every store_manager from confirming a refund at their own store.
  */
 pub async fn refund_store_id(conn: &mut PgConnection, refund_id: Uuid) -> Result<Uuid, ApiError> {
     return sqlx::query_scalar(
         "SELECT s.store_id FROM atlas.refunds r
-         JOIN atlas.payments p ON p.id = r.payment_id
-         JOIN atlas.sales s ON s.id = p.sale_id
+         JOIN atlas.sales s ON s.id = r.sale_id
          WHERE r.id = $1",
     )
     .bind(refund_id)
@@ -111,7 +110,7 @@ pub async fn create_method(
     .await
     .map_err(|err| match err {
         sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
-            ApiError::conflict_with_code("A payment method with that code already exists.", "PAYMENT_METHOD_EXISTS")
+            ApiError::conflict_with_code("A payment method with that code already exists.", codes::PAYMENT_METHOD_EXISTS)
         }
         sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("22P02") => {
             ApiError::bad_request("kind must be one of cash, card, transfer, wallet, store_credit, other")
@@ -236,63 +235,212 @@ pub async fn list_payments_for_sale(
         .map_err(ApiError::from);
 }
 
+// === Refunds
+
+pub const REFUND_SELECT: &str = "SELECT r.id, r.sale_id, r.return_id, r.payment_id, r.payment_method_id,
+            pm.name AS method_name, pm.kind::text AS method_kind, r.amount_minor, r.status::text AS status,
+            r.reason, r.reference, r.requested_by_user_id, r.approved_by_user_id, r.approved_at,
+            r.executed_at, r.created_at
+     FROM atlas.refunds r
+     LEFT JOIN atlas.payment_methods pm ON pm.id = r.payment_method_id";
+
+pub async fn get_refund(conn: &mut PgConnection, refund_id: Uuid) -> Result<Refund, ApiError> {
+    return sqlx::query_as::<_, Refund>(&format!("{} WHERE r.id = $1", REFUND_SELECT))
+        .bind(refund_id)
+        .fetch_optional(conn)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Refund not found."));
+}
+
+pub async fn list_refunds_for_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<Vec<Refund>, ApiError> {
+    return sqlx::query_as::<_, Refund>(&format!("{} WHERE r.sale_id = $1 ORDER BY r.created_at, r.id", REFUND_SELECT))
+        .bind(sale_id)
+        .fetch_all(conn)
+        .await
+        .map_err(ApiError::from);
+}
+
 /**
- * First half of the two-step refund - mints and stores a hashed confirmation token, returns the raw one to the caller exactly once.
- * Executes nothing yet; see `confirm_refund`.
+ * How much of a sale can still be refunded: what was paid, less what has gone back already, less step-up refunds still waiting on their confirmation token (so two requests can't both claim the same money).
+ * Expects the sale row to be locked by the caller.
+ */
+pub async fn refundable_on_sale(conn: &mut PgConnection, sale_id: Uuid) -> Result<i64, ApiError> {
+    return sqlx::query_scalar(
+        "SELECT s.amount_paid_minor - s.amount_refunded_minor
+                - COALESCE((SELECT SUM(r.amount_minor) FROM atlas.refunds r
+                            WHERE r.sale_id = s.id AND r.status = 'awaiting_confirmation'
+                              AND r.confirmation_expires_at > now()), 0)::bigint
+         FROM atlas.sales s WHERE s.id = $1",
+    )
+    .bind(sale_id)
+    .fetch_one(conn)
+    .await
+    .map_err(ApiError::from);
+}
+
+/**
+ * Moves `amount_minor` of a payment into refunded, in one guarded UPDATE: the payment must be succeeded (or already partly refunded) and can never go past its own amount.
+ * The single place payment-level refund caps are enforced, for both return refunds and step-up refunds.
+ */
+pub async fn apply_refund_to_payment(conn: &mut PgConnection, payment_id: Uuid, amount_minor: i64) -> Result<(), ApiError> {
+    let updated = sqlx::query(
+        "UPDATE atlas.payments
+         SET refunded_amount_minor = refunded_amount_minor + $2,
+             status = CASE WHEN refunded_amount_minor + $2 = amount_minor
+                           THEN 'refunded'::atlas.payment_status
+                           ELSE 'partially_refunded'::atlas.payment_status END,
+             updated_at = now()
+         WHERE id = $1
+           AND status IN ('succeeded', 'partially_refunded')
+           AND refunded_amount_minor + $2 <= amount_minor",
+    )
+    .bind(payment_id)
+    .bind(amount_minor)
+    .execute(conn)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::conflict_with_code(
+            "That refund is more than is left on the payment.",
+            codes::REFUND_AMOUNT_EXCEEDED,
+        ));
+    }
+    return Ok(());
+}
+
+pub async fn open_shift_at(conn: &mut PgConnection, store_id: Uuid) -> Result<Option<Uuid>, ApiError> {
+    return sqlx::query_scalar("SELECT id FROM atlas.shifts WHERE store_id = $1 AND status = 'open'")
+        .bind(store_id)
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::from);
+}
+
+/// The tenant's store-credit payment method (seeded for every tenant), which store-credit refunds are recorded against.
+pub async fn store_credit_method(conn: &mut PgConnection) -> Result<PaymentMethod, ApiError> {
+    return sqlx::query_as::<_, PaymentMethod>(&format!(
+        "SELECT {} FROM atlas.payment_methods WHERE kind = 'store_credit' ORDER BY is_active DESC, sort_order LIMIT 1",
+        METHOD_COLUMNS
+    ))
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::bad_request_with_code("No store credit payment method is configured.", codes::PAYMENT_METHOD_INVALID));
+}
+
+/**
+ * First half of the step-up refund - a refund against one payment that isn't tied to returned goods (a goodwill price adjustment). Mints and stores a hashed confirmation token and returns the raw one exactly once; executes nothing yet.
+ * The amount is reserved against both the payment and the sale straight away, so two requests can't each claim the same money before either is confirmed.
  */
 pub async fn request_refund(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     payment_id: Uuid,
     amount_minor: i64,
+    reason: &str,
     requested_by_user_id: Uuid,
 ) -> Result<(Refund, String), ApiError> {
+    if amount_minor <= 0 {
+        return Err(ApiError::bad_request("refund amount must be positive"));
+    }
+    if reason.trim().is_empty() {
+        return Err(ApiError::bad_request("a refund needs a reason"));
+    }
+    let payment = get_payment(conn, payment_id).await?;
+    crate::sales::service::lock_sale(conn, payment.sale_id).await?;
+
+    let reserved_on_payment: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_minor), 0)::bigint FROM atlas.refunds
+         WHERE payment_id = $1 AND status = 'awaiting_confirmation' AND confirmation_expires_at > now()",
+    )
+    .bind(payment_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let payment_left = if payment.status == "succeeded" || payment.status == "partially_refunded" {
+        payment.amount_minor - payment.refunded_amount_minor - reserved_on_payment
+    } else {
+        0
+    };
+    let sale_left = refundable_on_sale(conn, payment.sale_id).await?;
+    if amount_minor > payment_left.min(sale_left) {
+        return Err(ApiError::conflict_with_code(
+            format!("Only {} can still be refunded on this payment.", payment_left.min(sale_left).max(0)),
+            codes::REFUND_AMOUNT_EXCEEDED,
+        ));
+    }
+
     let token = crypto::generate_opaque_token();
     let token_hash = crypto::hash_lookup_token(&token);
     let expires_at = Utc::now() + Duration::minutes(CONFIRMATION_WINDOW_MINUTES);
-
-    let refund = sqlx::query_as::<_, Refund>(
+    let refund_id = Uuid::now_v7();
+    sqlx::query(
         "INSERT INTO atlas.refunds
-            (id, tenant_id, payment_id, amount_minor, confirmation_token_hash, confirmation_expires_at, requested_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, payment_id, amount_minor, status::text AS status",
+            (id, tenant_id, sale_id, payment_id, payment_method_id, amount_minor, reason,
+             confirmation_token_hash, confirmation_expires_at, requested_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
-    .bind(Uuid::now_v7())
+    .bind(refund_id)
     .bind(tenant_id)
+    .bind(payment.sale_id)
     .bind(payment_id)
+    .bind(payment.payment_method_id)
     .bind(amount_minor)
+    .bind(reason.trim())
     .bind(&token_hash)
     .bind(expires_at)
     .bind(requested_by_user_id)
-    .fetch_one(conn)
+    .execute(&mut *conn)
     .await?;
 
-    return Ok((refund, token));
+    return Ok((get_refund(conn, refund_id).await?, token));
 }
 
 /**
- * Second half - executes a refund that's still `awaiting_confirmation`, its token matches, and the confirmation window hasn't expired.
+ * Second half - executes a refund that's still `awaiting_confirmation`, whose token matches and whose window hasn't expired, then moves the money: the payment's refunded amount and status, and the sale's refunded total.
  * Any other state (already executed, wrong token, expired) is a flat rejection, not a partial success.
  */
 pub async fn confirm_refund(
     conn: &mut PgConnection,
     refund_id: Uuid,
     confirmation_token: &str,
+    confirmed_by_user_id: Uuid,
 ) -> Result<Refund, ApiError> {
     let token_hash = crypto::hash_lookup_token(confirmation_token);
+    let (sale_id, store_id): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT r.sale_id, s.store_id FROM atlas.refunds r JOIN atlas.sales s ON s.id = r.sale_id WHERE r.id = $1",
+    )
+    .bind(refund_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| ApiError::bad_request("Invalid, expired, or already-resolved refund confirmation."))?;
+    crate::sales::service::lock_sale(conn, sale_id).await?;
+    let shift_id = open_shift_at(conn, store_id).await?;
 
-    return sqlx::query_as::<_, Refund>(
+    let executed: Option<(Option<Uuid>, i64)> = sqlx::query_as(
         "UPDATE atlas.refunds
-         SET status = 'executed'
+         SET status = 'executed', executed_at = now(), executed_by_user_id = $3,
+             approved_by_user_id = $3, approved_at = now(), shift_id = $4
          WHERE id = $1
            AND status = 'awaiting_confirmation'
            AND confirmation_token_hash = $2
            AND confirmation_expires_at > now()
-         RETURNING id, payment_id, amount_minor, status::text AS status",
+         RETURNING payment_id, amount_minor",
     )
     .bind(refund_id)
     .bind(&token_hash)
-    .fetch_optional(conn)
-    .await?
-    .ok_or_else(|| ApiError::bad_request("Invalid, expired, or already-resolved refund confirmation."));
+    .bind(confirmed_by_user_id)
+    .bind(shift_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((payment_id, amount_minor)) = executed else {
+        return Err(ApiError::bad_request("Invalid, expired, or already-resolved refund confirmation."));
+    };
+
+    if let Some(payment_id) = payment_id {
+        apply_refund_to_payment(conn, payment_id, amount_minor).await?;
+    }
+    sqlx::query("UPDATE atlas.sales SET amount_refunded_minor = amount_refunded_minor + $2 WHERE id = $1")
+        .bind(sale_id)
+        .bind(amount_minor)
+        .execute(&mut *conn)
+        .await?;
+    return get_refund(conn, refund_id).await;
 }

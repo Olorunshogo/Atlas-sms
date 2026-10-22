@@ -58,17 +58,31 @@ pub struct ListPaymentsQuery {
     pub sale_id: Uuid,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
+/// Money returned to a customer for one sale - through one of its payments, to store credit, or out through another method.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct Refund {
     pub id: Uuid,
-    pub payment_id: Uuid,
+    pub sale_id: Uuid,
+    pub return_id: Option<Uuid>,
+    pub payment_id: Option<Uuid>,
+    pub payment_method_id: Option<Uuid>,
+    pub method_name: Option<String>,
+    pub method_kind: Option<String>,
     pub amount_minor: i64,
     pub status: String,
+    pub reason: Option<String>,
+    pub reference: Option<String>,
+    pub requested_by_user_id: Uuid,
+    pub approved_by_user_id: Option<Uuid>,
+    pub approved_at: Option<DateTime<Utc>>,
+    pub executed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RequestRefundRequest {
     pub amount_minor: i64,
+    pub reason: String,
 }
 
 /// The raw confirmation token is only ever returned once, here - it's never stored (only its hash is), so this response is the one chance a caller has to capture it before confirming.
