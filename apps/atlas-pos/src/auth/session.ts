@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import type { IssuedSession } from '@atlas/api';
 
 /**
  * Access token stays in memory. Refresh token stays in memory too, because this app has no secure-storage plugin installed yet.
@@ -10,6 +11,9 @@ export interface PosSession {
   tenantId: string | null;
   storeId: string | null;
   userName: string;
+  email: string;
+  /** `false` keeps the till on the verify screen; every tenant call is refused until then. */
+  emailVerified: boolean;
 }
 
 export const posSession = reactive<PosSession>({
@@ -18,18 +22,22 @@ export const posSession = reactive<PosSession>({
   tenantId: null,
   storeId: null,
   userName: '',
+  email: '',
+  emailVerified: false,
 });
 
-export function rememberSession(input: {
-  accessToken: string;
-  refreshToken: string;
-  tenantId: string;
-  userName: string;
-}): void {
-  posSession.accessToken = input.accessToken;
-  posSession.refreshToken = input.refreshToken;
-  posSession.tenantId = input.tenantId;
-  posSession.userName = input.userName;
+/** Stores a login, refresh or switch-tenant result. `false` when the body had no tokens, which an `app` client always gets. */
+export function rememberSession(issued: IssuedSession): boolean {
+  if (!issued.access_token || !issued.refresh_token) {
+    return false;
+  }
+  posSession.accessToken = issued.access_token;
+  posSession.refreshToken = issued.refresh_token;
+  posSession.tenantId = issued.tenant_id;
+  posSession.userName = issued.user.full_name;
+  posSession.email = issued.user.email;
+  posSession.emailVerified = issued.user.email_verified;
+  return true;
 }
 
 export function clearPosSession(): void {
@@ -38,6 +46,8 @@ export function clearPosSession(): void {
   posSession.tenantId = null;
   posSession.storeId = null;
   posSession.userName = '';
+  posSession.email = '';
+  posSession.emailVerified = false;
 }
 
 export function signedIn(): boolean {

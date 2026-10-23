@@ -1,4 +1,6 @@
-import type { ApiBody, ApiFailure } from './types';
+import type { ApiBody, ApiFailure, ApiResult } from './types';
+
+export const EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED';
 
 const UNEXPECTED_MESSAGE = 'Unexpected response from the server.';
 
@@ -44,4 +46,13 @@ export function isSuccess<T>(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+/** The account behind this session hasn't verified its email, so tenant endpoints are closed to it. */
+export function isEmailNotVerified(result: ApiResult<unknown>): boolean {
+  return (
+    result.status === 403 &&
+    !result.body.success &&
+    result.body.code === EMAIL_NOT_VERIFIED
+  );
 }

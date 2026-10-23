@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::crypto;
-use crate::error::ApiError;
+use crate::error::{codes, ApiError};
 use crate::extractors::AdminTx;
 use crate::response::ApiEnvelope;
 use crate::state::AppState;
@@ -16,7 +16,7 @@ use super::cookies::{self, client_type, ClientType};
 use super::models::{
     AcceptInviteRequest, AuthenticatedUser, ChoiceErrorBody, ForgotPasswordRequest, LoginRequest, PlatformInviteRequest,
     RefreshRequest, ResetPasswordRequest, SessionData, SessionProfile, SignupRequest, SignupResponseData,
-    SwitchTenantRequest, TenantChoice, TenantChoiceList, VerifyEmailRequest,
+    ResendVerificationRequest, SwitchTenantRequest, TenantChoice, TenantChoiceList, VerifyEmailRequest,
 };
 use super::{jwt, otp, password};
 
@@ -58,7 +58,7 @@ pub async fn signup(
         } else {
             Err(ApiError::bad_request_with_code(
                 "This email is registered but not yet verified. Please verify your email.",
-                "EMAIL_NOT_VERIFIED",
+                codes::EMAIL_NOT_VERIFIED,
             ))
         };
     }
@@ -170,6 +170,43 @@ async fn send_otp(
 }
 
 // === Verify email
+
+const RESEND_COOLDOWN_SECONDS: i64 = 60;
+
+/**
+ * `POST /api/v1/auth/resend-verification`.
+ * Same answer whether or not the email has an unverified account, so it can't be used to probe for accounts. One code per minute per user.
+ */
+pub async fn resend_verification(
+    State(state): State<AppState>,
+    mut tx: AdminTx,
+    Json(payload): Json<ResendVerificationRequest>,
+) -> Result<Json<ApiEnvelope<()>>, ApiError> {
+    let user_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM atlas.users WHERE email = $1 AND NOT is_email_verified AND deleted_at IS NULL")
+            .bind(&payload.email)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    if let Some(user_id) = user_id {
+        let recent: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM atlas.email_otps
+             WHERE user_id = $1 AND purpose = 'signup_verification' AND created_at > now() - make_interval(secs => $2)
+             LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(RESEND_COOLDOWN_SECONDS as f64)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if recent.is_some() {
+            return Err(ApiError::TooManyRequests("A code was just sent. Wait a minute before asking for another.".to_string()));
+        }
+        send_otp(&mut tx, &state, user_id, &payload.email, "signup_verification", "Verify your Atlas account").await?;
+    }
+
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("If that account still needs verifying, a new code is on its way.", ())));
+}
 
 /**
  * `POST /api/v1/auth/verify-email`.
@@ -288,10 +325,6 @@ pub async fn login(
         return Err(ApiError::bad_request("Wrong email or password."));
     }
 
-    if !is_email_verified {
-        return Err(ApiError::forbidden("Please verify your email before logging in."));
-    }
-
     // Store-scoped staff (cashier, store manager) hold a tenant_id with scope
     // 'store'. Counting only scope = 'tenant' locked them out of login.
     let choices = list_grant_tenants(&mut tx, user_id).await?;
@@ -334,7 +367,7 @@ pub async fn login(
     let (access_token, refresh_token) = issue_session(&mut tx, user_id, tenant_id, &state).await?;
     tx.commit().await?;
 
-    let user = AuthenticatedUser { id: user_id, full_name, email };
+    let user = AuthenticatedUser { id: user_id, full_name, email, email_verified: is_email_verified };
     return Ok(session_response(client_type(&headers), "Logged in.", access_token, refresh_token, tenant_id, user));
 }
 
@@ -438,7 +471,7 @@ pub async fn refresh(
     let (old_token_id, user_id, tenant_id) =
         row.ok_or_else(|| ApiError::Unauthorized("Invalid or expired refresh token.".to_string()))?;
 
-    let user: (String, String) = sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1")
+    let user: (String, String, bool) = sqlx::query_as("SELECT full_name, email, is_email_verified FROM atlas.users WHERE id = $1")
         .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -451,7 +484,7 @@ pub async fn refresh(
     let (access_token, refresh_token) = issue_session(&mut tx, user_id, tenant_id, &state).await?;
     tx.commit().await?;
 
-    let authenticated_user = AuthenticatedUser { id: user_id, full_name: user.0, email: user.1 };
+    let authenticated_user = AuthenticatedUser { id: user_id, full_name: user.0, email: user.1, email_verified: user.2 };
     return Ok(session_response(client, "Token refreshed.", access_token, refresh_token, tenant_id, authenticated_user));
 }
 
@@ -715,8 +748,8 @@ pub async fn switch_tenant(
         }
     }
 
-    let user: (String, String) =
-        sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1")
+    let user: (String, String, bool) =
+        sqlx::query_as("SELECT full_name, email, is_email_verified FROM atlas.users WHERE id = $1")
             .bind(claims.sub)
             .fetch_one(&mut *tx)
             .await?;
@@ -724,7 +757,7 @@ pub async fn switch_tenant(
     let (access_token, refresh_token) = issue_session(&mut tx, claims.sub, payload.tenant_id, &state).await?;
     tx.commit().await?;
 
-    let authenticated_user = AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1 };
+    let authenticated_user = AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1, email_verified: user.2 };
     return Ok(session_response(
         client_type(&headers),
         "Switched tenant.",
@@ -747,7 +780,7 @@ pub async fn get_session(
     mut tx: AdminTx,
 ) -> Result<Json<ApiEnvelope<SessionProfile>>, ApiError> {
     let claims = jwt::decode_access_token(&bearer_token(&headers)?, &state.jwt_secret)?;
-    let user: (String, String) = sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1 AND deleted_at IS NULL")
+    let user: (String, String, bool) = sqlx::query_as("SELECT full_name, email, is_email_verified FROM atlas.users WHERE id = $1 AND deleted_at IS NULL")
         .bind(claims.sub)
         .fetch_optional(&mut *tx)
         .await?
@@ -760,7 +793,7 @@ pub async fn get_session(
     return Ok(Json(ApiEnvelope::ok(
         "Session fetched.",
         SessionProfile {
-            user: AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1 },
+            user: AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1, email_verified: user.2 },
             tenant_id: claims.tenant_id,
             is_platform_admin: platform_admin,
             tenants,
@@ -879,7 +912,8 @@ async fn list_grant_tenants(tx: &mut AdminTx, user_id: Uuid) -> Result<Vec<Tenan
         "SELECT DISTINCT t.id, t.name
          FROM atlas.role_grants rg
          JOIN atlas.tenants t ON t.id = rg.tenant_id
-         WHERE rg.user_id = $1 AND rg.status = 'active' AND rg.deleted_at IS NULL AND rg.tenant_id IS NOT NULL
+         WHERE rg.user_id = $1 AND rg.deleted_at IS NULL AND rg.tenant_id IS NOT NULL
+           AND (rg.status = 'active' OR (rg.status = 'pending' AND rg.granted_by_user_id = rg.user_id))
          ORDER BY t.name",
     )
     .bind(user_id)

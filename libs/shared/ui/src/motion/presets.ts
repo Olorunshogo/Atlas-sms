@@ -9,6 +9,28 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 const DESKTOP_QUERY = '(min-width: 64rem)';
 
+/** Every duration, offset and ease Atlas animates with. Change motion here, never in a component. */
+export const motionTokens = {
+  easeOut: 'power2.out',
+  easeIn: 'power2.in',
+  easeOutStrong: 'power3.out',
+  revealDuration: 0.6,
+  revealY: 40,
+  revealStart: 'top 85%',
+  dialogBackdropEnter: 0.2,
+  dialogPanelEnter: 0.35,
+  dialogPanelExit: 0.22,
+  dialogBackdropExit: 0.18,
+  modalEnterDuration: 0.35,
+  modalEnterStagger: 0.06,
+  modalEnterY: 12,
+  modalExitDuration: 0.18,
+  modalExitY: 8,
+} as const;
+
+/** Elements a modal staggers in when it opens. */
+export const MODAL_FIELD_SELECTOR = '[data-gsap-field]';
+
 let scrollTriggerReady = false;
 
 export function registerScrollTrigger(): void {
@@ -50,8 +72,21 @@ export function playDialogEnter(
     gsap.set(panel, { opacity: 0, y: offset });
     gsap
       .timeline()
-      .to(backdrop, { opacity: 1, duration: 0.2, ease: 'power2.out' })
-      .to(panel, { opacity: 1, y: 0, duration: 0.35, ease: 'power3.out' }, '<');
+      .to(backdrop, {
+        opacity: 1,
+        duration: motionTokens.dialogBackdropEnter,
+        ease: motionTokens.easeOut,
+      })
+      .to(
+        panel,
+        {
+          opacity: 1,
+          y: 0,
+          duration: motionTokens.dialogPanelEnter,
+          ease: motionTokens.easeOutStrong,
+        },
+        '<',
+      );
   });
 }
 
@@ -74,10 +109,51 @@ export function playDialogExit(
     .to(panel, {
       opacity: 0,
       y: offset,
-      duration: 0.22,
-      ease: 'power2.in',
+      duration: motionTokens.dialogPanelExit,
+      ease: motionTokens.easeIn,
     })
-    .to(backdrop, { opacity: 0, duration: 0.18 }, '<');
+    .to(
+      backdrop,
+      { opacity: 0, duration: motionTokens.dialogBackdropExit },
+      '<',
+    );
+}
+
+/** Staggers a modal's `[data-gsap-field]` elements in, after the panel itself has started entering. */
+export function playModalFieldsEnter(root: HTMLElement): void {
+  const fields = root.querySelectorAll<HTMLElement>(MODAL_FIELD_SELECTOR);
+  if (prefersReducedMotion() || fields.length === 0) {
+    return;
+  }
+  gsap.fromTo(
+    fields,
+    { opacity: 0, y: motionTokens.modalEnterY },
+    {
+      opacity: 1,
+      y: 0,
+      duration: motionTokens.modalEnterDuration,
+      stagger: motionTokens.modalEnterStagger,
+      ease: motionTokens.easeOut,
+    },
+  );
+}
+
+/** Fades a modal's content out, then runs `onComplete`, so the panel's own exit plays after the content is gone. */
+export function playModalContentExit(
+  root: HTMLElement,
+  onComplete: () => void,
+): void {
+  if (prefersReducedMotion()) {
+    onComplete();
+    return;
+  }
+  gsap.to(root, {
+    opacity: 0,
+    y: motionTokens.modalExitY,
+    duration: motionTokens.modalExitDuration,
+    ease: motionTokens.easeIn,
+    onComplete,
+  });
 }
 
 /*
@@ -91,13 +167,13 @@ export function revealOnScroll(root: HTMLElement): () => void {
       const targets = gsap.utils.toArray<HTMLElement>('[data-gsap="reveal"]');
       targets.forEach((element) => {
         gsap.from(element, {
-          y: 40,
+          y: motionTokens.revealY,
           opacity: 0,
-          duration: 0.6,
-          ease: 'power3.out',
+          duration: motionTokens.revealDuration,
+          ease: motionTokens.easeOutStrong,
           scrollTrigger: {
             trigger: element,
-            start: 'top 85%',
+            start: motionTokens.revealStart,
             toggleActions: 'play none none none',
           },
         });

@@ -14,6 +14,7 @@ import { usePageSeo } from '../composables/use-page-seo';
 import {
   isSuccess,
   posRequest,
+  type IssuedSession,
   type SessionProfile,
   type StoreRecord,
   type TenantChoice,
@@ -75,29 +76,14 @@ async function loadHome(): Promise<void> {
 async function onTenantChange(event: Event): Promise<void> {
   const target = event.target as HTMLSelectElement;
   errorMessage.value = '';
-  const result = await posRequest<{
-    access_token?: string;
-    refresh_token?: string;
-    tenant_id: string;
-    user: { full_name: string };
-  }>('auth/switch-tenant', {
+  const result = await posRequest<IssuedSession>('auth/switch-tenant', {
     method: 'POST',
     body: { tenant_id: target.value },
   });
-  if (
-    !isSuccess(result.body) ||
-    !result.body.data.access_token ||
-    !result.body.data.refresh_token
-  ) {
+  if (!isSuccess(result.body) || !rememberSession(result.body.data)) {
     errorMessage.value = result.body.message;
     return;
   }
-  rememberSession({
-    accessToken: result.body.data.access_token,
-    refreshToken: result.body.data.refresh_token,
-    tenantId: result.body.data.tenant_id,
-    userName: result.body.data.user.full_name,
-  });
   posSession.storeId = null;
   await loadHome();
 }

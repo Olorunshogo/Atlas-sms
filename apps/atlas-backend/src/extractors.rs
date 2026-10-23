@@ -6,7 +6,7 @@ use sqlx::{PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::auth::decode_access_token;
-use crate::error::ApiError;
+use crate::error::{codes, ApiError};
 use crate::state::AppState;
 
 // === TenantTx
@@ -83,6 +83,20 @@ where
                 .execute(&mut *tx)
                 .await
                 .map_err(ApiError::from)?;
+        }
+
+        // Read per request, not from the token, so verifying takes effect on the very next call
+        let verified: Option<bool> = sqlx::query_scalar("SELECT is_email_verified FROM atlas.users WHERE id = $1 AND deleted_at IS NULL")
+            .bind(claims.sub)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ApiError::from)?;
+        match verified {
+            Some(true) => {}
+            Some(false) => {
+                return Err(ApiError::forbidden_with_code("Verify your email to continue.", codes::EMAIL_NOT_VERIFIED));
+            }
+            None => return Err(ApiError::Unauthorized("Unknown user.".to_string())),
         }
 
         return Ok(TenantTx {

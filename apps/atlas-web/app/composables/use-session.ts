@@ -1,6 +1,7 @@
 import {
   apiRequest,
   isSuccess,
+  SESSION_STATE_KEY,
   type SessionProfile,
   type StoreRecord,
   type TenantChoice,
@@ -12,7 +13,10 @@ import {
  * Tokens stay in HttpOnly cookies. This only keeps the profile the API is willing to return.
  */
 export function useSession() {
-  const profile = useState<SessionProfile | null>('atlas-session', () => null);
+  const profile = useState<SessionProfile | null>(
+    SESSION_STATE_KEY,
+    () => null,
+  );
   const loaded = useState<boolean>('atlas-session-loaded', () => false);
   const storeId = useState<string | null>('atlas-store-id', () => null);
   const stores = useState<StoreRecord[]>('atlas-stores', () => []);
@@ -46,7 +50,8 @@ export function useSession() {
     }
     loaded.value = true;
 
-    if (profile.value) {
+    // Tenant data is closed to an unverified account; the dashboard gate asks for the code instead
+    if (profile.value?.user.email_verified) {
       await loadWorkspace();
     }
   }
@@ -111,6 +116,10 @@ export function useSession() {
     await navigateTo('/auth/login');
   }
 
+  const emailVerified = computed((): boolean => {
+    return profile.value?.user.email_verified ?? false;
+  });
+
   const tenantOptions = computed((): TenantChoice[] => {
     if (profile.value?.is_platform_admin && platformTenants.value.length > 0) {
       return platformTenants.value;
@@ -124,6 +133,7 @@ export function useSession() {
     storeId,
     stores,
     currentTenant,
+    emailVerified,
     tenantOptions,
     loadSession,
     switchTenant,

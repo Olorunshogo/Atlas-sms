@@ -26,6 +26,11 @@ pub struct VerifyEmailRequest {
     pub code: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ResendVerificationRequest {
+    pub email: String,
+}
+
 // === Login / session
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +46,8 @@ pub struct AuthenticatedUser {
     pub id: Uuid,
     pub full_name: String,
     pub email: String,
+    /// `false` keeps every tenant-scoped endpoint closed (`403 EMAIL_NOT_VERIFIED`) until the user verifies.
+    pub email_verified: bool,
 }
 
 /**

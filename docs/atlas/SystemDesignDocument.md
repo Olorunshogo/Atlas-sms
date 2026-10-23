@@ -159,6 +159,7 @@ apps/
   atlas-pos/               # Ionic/Capacitor - login and session home
 packages/atlas-ui/
   core/ web/ app/           # shared Vue component library, three-package split
+  auth/                     # @atlas/ui-auth: auth forms and the email verification gate, shared by web and POS
 libs/shared/
   theme/ composables/ validation/
 ```
@@ -167,6 +168,37 @@ Every service depends on `TenantTx`/`AdminTx`, never a raw connection
 pool - the same "swap the implementation without touching business logic"
 goal the reference design gets from its `Repository<T>` trait, achieved
 here by the extractor being the only door into a transaction.
+
+### 3.1 Frontend convention: modals
+
+Ported from Celeris's `useModalMotion`. Two entry points share one frame
+(`DialogFrame`: backdrop, panel motion, focus trap):
+
+| Use                                     | For                                                            |
+| --------------------------------------- | -------------------------------------------------------------- |
+| `<Modal v-model:open>` from `@atlas/ui` | Any modal a page owns, especially one with form state          |
+| `triggerDialog(key, props)`             | One-line confirms, such as `DataTable` row actions (`CONFIRM`) |
+
+A `<Modal>` follows these rules. `apps/atlas-web/app/components/modals/InvitePlatformStaffModal.vue`
+is the reference to copy.
+
+- One component per modal, named `XxxModal.vue`, under `components/modals/`.
+  The parent opens it with `v-model:open`; the modal declares
+  `defineModel<boolean>('open')`. Mount a data-dependent modal with `v-if`.
+- Mark everything that should stagger in with `data-gsap-field`.
+- Every way out (Escape, backdrop, Close, Cancel, a finished save) goes
+  through `requestClose`, given to the slot as `close`. It fades the content
+  out before flipping `open`, so the panel exit plays after it.
+- Pass `:blocked="saving"` while a request runs. Nothing closes the modal
+  then, and the Close control hides.
+- Reset form state on `@after-leave`, once the modal is fully gone, never
+  when closing starts.
+- Timings live in `motionTokens` (`libs/shared/ui/src/motion/presets.ts`).
+  A component never sets its own duration or ease. Reduced motion skips
+  every tween.
+
+`useModal(open, bodyRef, { isBlocked })` is the composable underneath, for a
+modal that needs its own frame.
 
 ---
 
@@ -235,21 +267,21 @@ Migrations through `20261022000034_returns_and_refunds.sql`, grouped by what the
 sequential IDs would let a tenant infer record counts from a public store
 slug). All timestamps are `TIMESTAMPTZ`.
 
-| Group      | Tables                                                                                                      | Notes                                                                                                        |
-| ---------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Identity   | `users`                                                                                                     | One human, one row, ever. Access is entirely in `role_grants`, not here.                                     |
-| Tenancy    | `tenants`, `stores`                                                                                         | Flat - no ancestor chain. See Section 15's CAP/scaling note.                                                 |
-| Access     | `roles`, `role_grants`, `store_group_grants`                                                                | Dynamic roles, not a fixed ladder. See Section 8.                                                            |
-| Auth       | `email_otps`, `refresh_tokens`, `invites`                                                                   | OTP verification, rotating refresh tokens, the invite flow.                                                  |
-| Catalogue  | `product_types`, `units_of_measure`, `products`, `product_sale_units`, `product_store_listings`, `product_barcodes` | Attribute-schema-per-type, not per-vertical columns; unit conversions; per-store cost/threshold/active flag; barcodes per sale unit. |
-| Inventory  | `stock_items`, `stock_movements`, `stock_exceptions`                                                        | Append-only ledger written only by `inventory::service::post`; on-hand is `SUM(quantity)`. Oversold offline sales land in `stock_exceptions`. |
-| Pricing    | `customer_groups`, `price_rules`, `tax_rates`                                                               | Price is a resolved answer (product, store, group, quantity, date), never a bare column. Tax rates are basis points. |
-| Modules    | `store_module_toggles`                                                                                      | Per-store feature flags (recipes, layaway, etc.)                                                             |
-| Sales      | `shifts`, `customers`, `sales`, `sale_lines`, `sale_receipts`, `receipt_prints`, `store_receipt_sequences`  | `sales.id` is client-generated - see Section 7.3. Lines snapshot names, prices, discounts and tax; receipts snapshot everything printed. |
-| Returns    | `returns`, `return_lines`, `store_return_sequences`, `customer_credit_movements`                            | `returns.id` is client-generated like a sale's. See Section 7.5.                                             |
-| Purchasing | `suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_received_notes`, `goods_received_note_lines` | `purchasing/` handlers.                                                                                      |
-| Billing    | `subscriptions`, `tenant_entitlements`, `payment_methods`, `payments`, `refunds`                            | Payment methods are tenant-configured. Refunds are sale-level, from a return or the two-step confirm-token flow. Subscriptions have no handlers. |
-| Audit      | `audit_events`                                                                                              | Written by mutating handlers via `audit::record`. No read API.                                               |
+| Group      | Tables                                                                                                              | Notes                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity   | `users`                                                                                                             | One human, one row, ever. Access is entirely in `role_grants`, not here.                                                                         |
+| Tenancy    | `tenants`, `stores`                                                                                                 | Flat - no ancestor chain. See Section 15's CAP/scaling note.                                                                                     |
+| Access     | `roles`, `role_grants`, `store_group_grants`                                                                        | Dynamic roles, not a fixed ladder. See Section 8.                                                                                                |
+| Auth       | `email_otps`, `refresh_tokens`, `invites`                                                                           | OTP verification, rotating refresh tokens, the invite flow.                                                                                      |
+| Catalogue  | `product_types`, `units_of_measure`, `products`, `product_sale_units`, `product_store_listings`, `product_barcodes` | Attribute-schema-per-type, not per-vertical columns; unit conversions; per-store cost/threshold/active flag; barcodes per sale unit.             |
+| Inventory  | `stock_items`, `stock_movements`, `stock_exceptions`                                                                | Append-only ledger written only by `inventory::service::post`; on-hand is `SUM(quantity)`. Oversold offline sales land in `stock_exceptions`.    |
+| Pricing    | `customer_groups`, `price_rules`, `tax_rates`                                                                       | Price is a resolved answer (product, store, group, quantity, date), never a bare column. Tax rates are basis points.                             |
+| Modules    | `store_module_toggles`                                                                                              | Per-store feature flags (recipes, layaway, etc.)                                                                                                 |
+| Sales      | `shifts`, `customers`, `sales`, `sale_lines`, `sale_receipts`, `receipt_prints`, `store_receipt_sequences`          | `sales.id` is client-generated - see Section 7.3. Lines snapshot names, prices, discounts and tax; receipts snapshot everything printed.         |
+| Returns    | `returns`, `return_lines`, `store_return_sequences`, `customer_credit_movements`                                    | `returns.id` is client-generated like a sale's. See Section 7.5.                                                                                 |
+| Purchasing | `suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_received_notes`, `goods_received_note_lines`         | `purchasing/` handlers.                                                                                                                          |
+| Billing    | `subscriptions`, `tenant_entitlements`, `payment_methods`, `payments`, `refunds`                                    | Payment methods are tenant-configured. Refunds are sale-level, from a return or the two-step confirm-token flow. Subscriptions have no handlers. |
+| Audit      | `audit_events`                                                                                                      | Written by mutating handlers via `audit::record`. No read API.                                                                                   |
 
 Field-level detail for the tables actually in use is in Appendix A.
 
@@ -266,57 +298,57 @@ The table below is the route map. Request and response bodies, query
 parameters, permissions and error codes for every route are in
 [api-reference.md](api-reference.md).
 
-| Method & Path                                            | Handler                                      | Auth                           |
-| -------------------------------------------------------- | -------------------------------------------- | ------------------------------ |
-| `GET /health`                                            | -                                            | none                           |
-| `POST /api/v1/auth/signup`                               | `auth::signup`                               | none (`AdminTx`)               |
-| `POST /api/v1/auth/verify-email`                         | `auth::verify_email`                         | none                           |
-| `POST /api/v1/auth/login`                                | `auth::login`                                | none                           |
-| `POST /api/v1/auth/refresh`                              | `auth::refresh`                              | refresh token                  |
-| `POST /api/v1/auth/invites/{token}/accept`               | `auth::accept_invite`                        | invite token                   |
-| `POST /api/v1/auth/forgot-password`                      | `auth::forgot_password`                      | none                           |
-| `POST /api/v1/auth/reset-password`                       | `auth::reset_password`                       | OTP                            |
-| `GET /api/v1/tenants/me` / `PATCH ...`                   | `tenants::get_current_tenant` / `update_business_details` | `TenantTx`; PATCH `tenant.manage` |
-| `GET /api/v1/stores` / `POST /api/v1/stores`             | `stores::list_stores` / `create_store`       | `TenantTx`                     |
-| `GET/PATCH /api/v1/stores/{id}/settings`                 | `stores::settings::*`                        | `sale.create` (read), `store.update` |
-| `GET /api/v1/stores/{id}/catalog?q=`                     | `catalog::search`                            | `sale.create`                  |
-| `GET /api/v1/stores/{id}/catalog/barcode/{code}`         | `catalog::by_barcode`                        | `sale.create`                  |
-| `POST /api/v1/stores/{id}/catalog/quote`                 | `catalog::quote`                             | `sale.create`                  |
-| `GET /api/v1/stores/{id}/catalog/snapshot`               | `catalog::snapshot`                          | `sale.create`                  |
-| `GET /api/v1/roles`                                      | `roles::list_roles`                          | `TenantTx`                     |
-| `POST /api/v1/roles/invite`                              | `roles::invite`                              | `TenantTx`, `staff.invite`     |
-| `GET /api/v1/product-types` / `POST ...`                 | `products::*_product_types`                  | `TenantTx`                     |
-| `GET /api/v1/products` / `POST /api/v1/products`         | `products::list_products` / `create_product` | `TenantTx`                     |
-| `PATCH /api/v1/products/{id}`, `PUT .../listings/{store_id}`, `POST .../sale-units`, `.../price-rules`, `.../barcodes` | `products::selling::*` | `product.manage` |
-| `GET/POST /api/v1/tax-rates`, `PATCH .../{id}`           | `pricing::handlers::*`                       | `product.manage` to write      |
-| `GET /api/v1/stock/on-hand`                              | `stock::get_stock_on_hand`                   | `TenantTx`                     |
-| `POST /api/v1/stock/adjustments`                         | `stock::adjust_stock`                        | `TenantTx`, `stock.adjust`     |
-| `POST /api/v1/stock/transfers`                           | `stock::transfer_stock`                      | `TenantTx`, `stock.transfer`   |
-| `POST /api/v1/shifts` / `POST /api/v1/shifts/{id}/close` | `sales::open_shift` / `close_shift`          | `sale.create` at the store; close returns the drawer count |
-| `POST /api/v1/sales`                                     | `sales::create_sale`                         | `sale.create`                  |
-| `GET /api/v1/sales?store_id=&from=&to=&cashier_user_id=&customer_id=&status=&payment_status=&q=` | `sales::list_sales` | `sale.view`, else own sales in open shifts |
-| `GET /api/v1/sales/{id}`, `/lines`                       | `sales::get_sale` / `list_sale_lines`        | `sale.view`, or own sale in open shift |
-| `GET /api/v1/sales/by-receipt/{receipt_number}`          | `sales::get_by_receipt`                      | `sale.view` or `sale.return`   |
-| `POST /api/v1/sales/{id}/payments`                       | `sales::add_payment`                         | `sale.create`                  |
-| `POST /api/v1/sales/{id}/void`                           | `sales::void_sale`                           | `sale.void`                    |
-| `GET /api/v1/sales/{id}/receipt?format=json\|text`       | `sales::get_receipt`                         | as reading the sale            |
-| `POST /api/v1/sales/{id}/receipt/prints`                 | `sales::print_receipt`                       | first print as reading the sale; reprints `receipt.reprint` |
-| `GET/POST /api/v1/sales/{id}/returns`                    | `returns::list_for_sale` / `create_return`   | `sale.view`/`sale.return`; create `sale.return` |
-| `GET /api/v1/returns`, `GET /api/v1/returns/{id}`, `/receipt` | `returns::*`                            | `sale.view` or `sale.return`   |
-| `POST /api/v1/returns/{id}/approve` / `reject`           | `returns::approve_return` / `reject_return`  | `sale.refund`, not the requester |
-| `POST /api/v1/sync/sales`                                | `sync::sync_sale`                            | `TenantTx`, `sale.create`      |
-| `POST /api/v1/auth/logout`                               | `auth::logout`                               | refresh token (cookie or body) |
-| `GET /api/v1/auth/me`                                    | `auth::get_session`                          | access token                   |
-| `POST /api/v1/auth/switch-tenant`                        | `auth::switch_tenant`                        | access token                   |
-| `GET /api/v1/auth/platform/tenants`                      | `auth::list_platform_tenants`                | platform grant                 |
-| `POST /api/v1/auth/platform/invite`                      | `auth::invite_platform_staff`                | platform grant                 |
-| `GET/POST /api/v1/customers`, `GET/PATCH/DELETE .../{id}` | `customers::`                               | `customer.view` / `customer.manage` at `x-store-id` |
-| `GET /api/v1/customers/{id}/sales`                       | `customers::purchase_history`                | `customer.history`             |
-| `GET/POST /api/v1/suppliers`, purchase orders, receive   | `purchasing::`                               | `TenantTx`                     |
-| `GET /api/v1/payments?sale_id=`, `POST .../{id}/refund`, `POST .../refunds/{id}/confirm` | `payments::`  | `sale.create`; refunds `sale.refund` |
-| `POST /api/v1/payments/{id}/status` / `.../reverse`      | `payments::resolve_payment` / `reverse_payment` | `payment.manage`            |
-| `GET/POST /api/v1/payment-methods`, `PATCH .../{id}`     | `payments::*_method`                         | `store.update` to write        |
-| `GET /api/v1/reports/payments/reconciliation`            | `reports::reconciliation`                    | `report.view` or `sale.view`   |
+| Method & Path                                                                                                          | Handler                                                   | Auth                                                        |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------- |
+| `GET /health`                                                                                                          | -                                                         | none                                                        |
+| `POST /api/v1/auth/signup`                                                                                             | `auth::signup`                                            | none (`AdminTx`)                                            |
+| `POST /api/v1/auth/verify-email`                                                                                       | `auth::verify_email`                                      | none                                                        |
+| `POST /api/v1/auth/login`                                                                                              | `auth::login`                                             | none                                                        |
+| `POST /api/v1/auth/refresh`                                                                                            | `auth::refresh`                                           | refresh token                                               |
+| `POST /api/v1/auth/invites/{token}/accept`                                                                             | `auth::accept_invite`                                     | invite token                                                |
+| `POST /api/v1/auth/forgot-password`                                                                                    | `auth::forgot_password`                                   | none                                                        |
+| `POST /api/v1/auth/reset-password`                                                                                     | `auth::reset_password`                                    | OTP                                                         |
+| `GET /api/v1/tenants/me` / `PATCH ...`                                                                                 | `tenants::get_current_tenant` / `update_business_details` | `TenantTx`; PATCH `tenant.manage`                           |
+| `GET /api/v1/stores` / `POST /api/v1/stores`                                                                           | `stores::list_stores` / `create_store`                    | `TenantTx`                                                  |
+| `GET/PATCH /api/v1/stores/{id}/settings`                                                                               | `stores::settings::*`                                     | `sale.create` (read), `store.update`                        |
+| `GET /api/v1/stores/{id}/catalog?q=`                                                                                   | `catalog::search`                                         | `sale.create`                                               |
+| `GET /api/v1/stores/{id}/catalog/barcode/{code}`                                                                       | `catalog::by_barcode`                                     | `sale.create`                                               |
+| `POST /api/v1/stores/{id}/catalog/quote`                                                                               | `catalog::quote`                                          | `sale.create`                                               |
+| `GET /api/v1/stores/{id}/catalog/snapshot`                                                                             | `catalog::snapshot`                                       | `sale.create`                                               |
+| `GET /api/v1/roles`                                                                                                    | `roles::list_roles`                                       | `TenantTx`                                                  |
+| `POST /api/v1/roles/invite`                                                                                            | `roles::invite`                                           | `TenantTx`, `staff.invite`                                  |
+| `GET /api/v1/product-types` / `POST ...`                                                                               | `products::*_product_types`                               | `TenantTx`                                                  |
+| `GET /api/v1/products` / `POST /api/v1/products`                                                                       | `products::list_products` / `create_product`              | `TenantTx`                                                  |
+| `PATCH /api/v1/products/{id}`, `PUT .../listings/{store_id}`, `POST .../sale-units`, `.../price-rules`, `.../barcodes` | `products::selling::*`                                    | `product.manage`                                            |
+| `GET/POST /api/v1/tax-rates`, `PATCH .../{id}`                                                                         | `pricing::handlers::*`                                    | `product.manage` to write                                   |
+| `GET /api/v1/stock/on-hand`                                                                                            | `stock::get_stock_on_hand`                                | `TenantTx`                                                  |
+| `POST /api/v1/stock/adjustments`                                                                                       | `stock::adjust_stock`                                     | `TenantTx`, `stock.adjust`                                  |
+| `POST /api/v1/stock/transfers`                                                                                         | `stock::transfer_stock`                                   | `TenantTx`, `stock.transfer`                                |
+| `POST /api/v1/shifts` / `POST /api/v1/shifts/{id}/close`                                                               | `sales::open_shift` / `close_shift`                       | `sale.create` at the store; close returns the drawer count  |
+| `POST /api/v1/sales`                                                                                                   | `sales::create_sale`                                      | `sale.create`                                               |
+| `GET /api/v1/sales?store_id=&from=&to=&cashier_user_id=&customer_id=&status=&payment_status=&q=`                       | `sales::list_sales`                                       | `sale.view`, else own sales in open shifts                  |
+| `GET /api/v1/sales/{id}`, `/lines`                                                                                     | `sales::get_sale` / `list_sale_lines`                     | `sale.view`, or own sale in open shift                      |
+| `GET /api/v1/sales/by-receipt/{receipt_number}`                                                                        | `sales::get_by_receipt`                                   | `sale.view` or `sale.return`                                |
+| `POST /api/v1/sales/{id}/payments`                                                                                     | `sales::add_payment`                                      | `sale.create`                                               |
+| `POST /api/v1/sales/{id}/void`                                                                                         | `sales::void_sale`                                        | `sale.void`                                                 |
+| `GET /api/v1/sales/{id}/receipt?format=json\|text`                                                                     | `sales::get_receipt`                                      | as reading the sale                                         |
+| `POST /api/v1/sales/{id}/receipt/prints`                                                                               | `sales::print_receipt`                                    | first print as reading the sale; reprints `receipt.reprint` |
+| `GET/POST /api/v1/sales/{id}/returns`                                                                                  | `returns::list_for_sale` / `create_return`                | `sale.view`/`sale.return`; create `sale.return`             |
+| `GET /api/v1/returns`, `GET /api/v1/returns/{id}`, `/receipt`                                                          | `returns::*`                                              | `sale.view` or `sale.return`                                |
+| `POST /api/v1/returns/{id}/approve` / `reject`                                                                         | `returns::approve_return` / `reject_return`               | `sale.refund`, not the requester                            |
+| `POST /api/v1/sync/sales`                                                                                              | `sync::sync_sale`                                         | `TenantTx`, `sale.create`                                   |
+| `POST /api/v1/auth/logout`                                                                                             | `auth::logout`                                            | refresh token (cookie or body)                              |
+| `GET /api/v1/auth/me`                                                                                                  | `auth::get_session`                                       | access token                                                |
+| `POST /api/v1/auth/switch-tenant`                                                                                      | `auth::switch_tenant`                                     | access token                                                |
+| `GET /api/v1/auth/platform/tenants`                                                                                    | `auth::list_platform_tenants`                             | platform grant                                              |
+| `POST /api/v1/auth/platform/invite`                                                                                    | `auth::invite_platform_staff`                             | platform grant                                              |
+| `GET/POST /api/v1/customers`, `GET/PATCH/DELETE .../{id}`                                                              | `customers::`                                             | `customer.view` / `customer.manage` at `x-store-id`         |
+| `GET /api/v1/customers/{id}/sales`                                                                                     | `customers::purchase_history`                             | `customer.history`                                          |
+| `GET/POST /api/v1/suppliers`, purchase orders, receive                                                                 | `purchasing::`                                            | `TenantTx`                                                  |
+| `GET /api/v1/payments?sale_id=`, `POST .../{id}/refund`, `POST .../refunds/{id}/confirm`                               | `payments::`                                              | `sale.create`; refunds `sale.refund`                        |
+| `POST /api/v1/payments/{id}/status` / `.../reverse`                                                                    | `payments::resolve_payment` / `reverse_payment`           | `payment.manage`                                            |
+| `GET/POST /api/v1/payment-methods`, `PATCH .../{id}`                                                                   | `payments::*_method`                                      | `store.update` to write                                     |
+| `GET /api/v1/reports/payments/reconciliation`                                                                          | `reports::reconciliation`                                 | `report.view` or `sale.view`                                |
 
 No routes yet for `module_toggles`, subscription billing, reports beyond
 payment reconciliation, notifications, or audit reads. The `/api/v1/auth` router is rate limited per IP. See Section 13
@@ -464,22 +496,22 @@ roles (`atlas.roles` + `atlas.role_grants`), not a fixed enum - a role is
 a named bundle from a fixed 26-value permission enum, and a grant is
 (user, role, tenant, optional store).
 
-| Capability                      | owner | admin | store_manager | cashier     | stock_clerk | accountant |
-| ------------------------------- | ----- | ----- | ------------- | ----------- | ----------- | ---------- |
-| Manage tenant (`tenant.manage`) | ✔️    | ✖️    | ✖️            | ✖️          | ✖️          | ✖️         |
-| Invite / remove staff           | ✔️    | ✔️    | invite only   | ✖️          | ✖️          | ✖️         |
-| Create / update stores          | ✔️    | ✔️    | ✖️            | ✖️          | ✖️          | ✖️         |
-| Manage products, units, prices  | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✖️         |
-| Adjust / transfer stock         | ✔️    | ✔️    | ✔️            | ✖️          | ✔️          | ✖️         |
-| View stock                      | ✔️    | ✔️    | ✔️            | ✔️          | ✔️          | ✔️         |
-| Create / void / refund sales    | ✔️    | ✔️    | ✔️            | create only | ✖️          | ✖️         |
-| Discounts, price overrides      | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✖️         |
-| Start returns                   | ✔️    | ✔️    | ✔️            | ✔️          | ✖️          | ✖️         |
-| View sales history, reprint     | ✔️    | ✔️    | ✔️            | own, open shift | ✖️      | view only  |
-| Look up / register customers    | ✔️    | ✔️    | ✔️            | ✔️ (masked) | ✖️          | ✖️         |
-| Customer history and contact    | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✔️         |
-| Confirm / reverse payments      | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✖️         |
-| View reports                    | ✔️    | ✔️    | ✔️            | ✖️          | ✖️          | ✔️         |
+| Capability                      | owner | admin | store_manager | cashier         | stock_clerk | accountant |
+| ------------------------------- | ----- | ----- | ------------- | --------------- | ----------- | ---------- |
+| Manage tenant (`tenant.manage`) | ✔️    | ✖️    | ✖️            | ✖️              | ✖️          | ✖️         |
+| Invite / remove staff           | ✔️    | ✔️    | invite only   | ✖️              | ✖️          | ✖️         |
+| Create / update stores          | ✔️    | ✔️    | ✖️            | ✖️              | ✖️          | ✖️         |
+| Manage products, units, prices  | ✔️    | ✔️    | ✔️            | ✖️              | ✖️          | ✖️         |
+| Adjust / transfer stock         | ✔️    | ✔️    | ✔️            | ✖️              | ✔️          | ✖️         |
+| View stock                      | ✔️    | ✔️    | ✔️            | ✔️              | ✔️          | ✔️         |
+| Create / void / refund sales    | ✔️    | ✔️    | ✔️            | create only     | ✖️          | ✖️         |
+| Discounts, price overrides      | ✔️    | ✔️    | ✔️            | ✖️              | ✖️          | ✖️         |
+| Start returns                   | ✔️    | ✔️    | ✔️            | ✔️              | ✖️          | ✖️         |
+| View sales history, reprint     | ✔️    | ✔️    | ✔️            | own, open shift | ✖️          | view only  |
+| Look up / register customers    | ✔️    | ✔️    | ✔️            | ✔️ (masked)     | ✖️          | ✖️         |
+| Customer history and contact    | ✔️    | ✔️    | ✔️            | ✖️              | ✖️          | ✔️         |
+| Confirm / reverse payments      | ✔️    | ✔️    | ✔️            | ✖️              | ✖️          | ✖️         |
+| View reports                    | ✔️    | ✔️    | ✔️            | ✖️              | ✖️          | ✔️         |
 
 **Enforcement**: `roles::service::assert_permission(conn, user, tenant,
 store, permission)` is the single generic check every handler calls - no
@@ -609,12 +641,12 @@ writers are the normal case here (Section 1.1):
 
 ## 12. Testing Strategy
 
-| Layer                      | Reference design's target                    | Atlas today                                                                               |
-| -------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Layer                      | Reference design's target                    | Atlas today                                                                                                                                     |
+| -------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Domain / unit              | Invariant tests (`#[cfg(test)]`)             | Pricing engine (rounding, tax, allocation, refunds), return window, masking, phone normalisation, receipt rendering, the one-stock-writer guard |
-| Repository / DB round-trip | Serialize/deserialize + crash simulation     | `rls_tests.rs` reads every new table as `atlas_api` for two tenants                       |
-| Service / integration      | Per-workflow (checkout, return, RBAC denial) | `sales_tests.rs`, `payment_tests.rs`, `receipt_tests.rs`, `returns_tests.rs`, `customer_tests.rs`, `catalog_tests.rs`, `inventory_tests.rs` |
-| API end-to-end             | Request/response assertion                   | All of the above drive the real router; plus `health_check.rs`, `auth_flow_tests.rs`, `roles_permission_tests.rs`, `commerce_tests.rs` |
+| Repository / DB round-trip | Serialize/deserialize + crash simulation     | `rls_tests.rs` reads every new table as `atlas_api` for two tenants                                                                             |
+| Service / integration      | Per-workflow (checkout, return, RBAC denial) | `sales_tests.rs`, `payment_tests.rs`, `receipt_tests.rs`, `returns_tests.rs`, `customer_tests.rs`, `catalog_tests.rs`, `inventory_tests.rs`     |
+| API end-to-end             | Request/response assertion                   | All of the above drive the real router; plus `health_check.rs`, `auth_flow_tests.rs`, `roles_permission_tests.rs`, `commerce_tests.rs`          |
 
 Each FR-15 to FR-19 acceptance criterion has a named test
 (`fr15_selling_two_bags_reduces_lagos_balance_to_98`, `fr16_...` through
@@ -926,38 +958,38 @@ for every other table.
 
 ### sales / sale_lines
 
-| Field                  | Type    | Constraints                                                                                 |
-| ---------------------- | ------- | ------------------------------------------------------------------------------------------- |
-| sales.id               | UUID v7 | **Client-generated** - doubles as the sync idempotency key, with `request_hash`             |
-| sales.device_id        | TEXT    | Not null                                                                                    |
-| sales.status           | enum    | `held` \| `awaiting_payment` \| `completed` \| `voided`                                     |
-| sales.payment_status   | enum    | `unpaid` \| `partially_paid` \| `paid`                                                      |
-| sales.\*\_amount_minor | BIGINT  | subtotal / discount / cart discount / tax / total / rounding / paid / refunded              |
-| sales.receipt_number   | TEXT    | `{prefix}-{seq:08}`, unique per tenant, gap-free per store                                  |
-| sale_lines.quantity    | NUMERIC | `CHECK (quantity > 0)`; `base_quantity` is what the ledger moved                            |
-| sale_lines snapshot    | various | product name, sku, unit name, list and charged price, discounts, tax rate and amount        |
+| Field                  | Type    | Constraints                                                                          |
+| ---------------------- | ------- | ------------------------------------------------------------------------------------ |
+| sales.id               | UUID v7 | **Client-generated** - doubles as the sync idempotency key, with `request_hash`      |
+| sales.device_id        | TEXT    | Not null                                                                             |
+| sales.status           | enum    | `held` \| `awaiting_payment` \| `completed` \| `voided`                              |
+| sales.payment_status   | enum    | `unpaid` \| `partially_paid` \| `paid`                                               |
+| sales.\*\_amount_minor | BIGINT  | subtotal / discount / cart discount / tax / total / rounding / paid / refunded       |
+| sales.receipt_number   | TEXT    | `{prefix}-{seq:08}`, unique per tenant, gap-free per store                           |
+| sale_lines.quantity    | NUMERIC | `CHECK (quantity > 0)`; `base_quantity` is what the ledger moved                     |
+| sale_lines snapshot    | various | product name, sku, unit name, list and charged price, discounts, tax rate and amount |
 
 ### payments / refunds
 
-| Field                      | Type   | Constraints                                                                                  |
-| -------------------------- | ------ | -------------------------------------------------------------------------------------------- |
-| payments.status            | enum   | `pending` \| `succeeded` \| `failed` \| `reversed` \| `partially_refunded` \| `refunded`        |
-| payments.amount_minor      | BIGINT | Applied to the sale, `> 0`; cash change is `tendered_amount_minor - amount_minor`            |
-| payments.reference         | TEXT   | Unique per method among pending/succeeded payments                                           |
+| Field                          | Type   | Constraints                                                                              |
+| ------------------------------ | ------ | ---------------------------------------------------------------------------------------- |
+| payments.status                | enum   | `pending` \| `succeeded` \| `failed` \| `reversed` \| `partially_refunded` \| `refunded` |
+| payments.amount_minor          | BIGINT | Applied to the sale, `> 0`; cash change is `tendered_amount_minor - amount_minor`        |
+| payments.reference             | TEXT   | Unique per method among pending/succeeded payments                                       |
 | payments.refunded_amount_minor | BIGINT | `<= amount_minor`                                                                        |
-| refunds.sale_id            | UUID   | Not null; `payment_id` null for store credit or another method                               |
-| refunds.status             | enum   | `awaiting_confirmation` \| `executed` \| `expired` \| `cancelled`                             |
+| refunds.sale_id                | UUID   | Not null; `payment_id` null for store credit or another method                           |
+| refunds.status                 | enum   | `awaiting_confirmation` \| `executed` \| `expired` \| `cancelled`                        |
 
 ### returns / return_lines
 
-| Field                         | Type    | Constraints                                                              |
-| ----------------------------- | ------- | ------------------------------------------------------------------------ |
-| returns.id                    | UUID v7 | Client-generated, with `request_hash`                                    |
-| returns.status                | enum    | `pending_approval` \| `completed` \| `rejected`                           |
-| returns.refund_method         | TEXT    | `original` \| `store_credit` \| `payment_method`                          |
-| return_lines.condition        | enum    | `resellable` \| `opened` \| `damaged` \| `defective` \| `expired`           |
-| return_lines.restock          | BOOLEAN | Condition is in the store's `restockable_conditions`                     |
-| return_lines.stock_movement_id | UUID   | Set only for restocked lines                                             |
+| Field                          | Type    | Constraints                                                       |
+| ------------------------------ | ------- | ----------------------------------------------------------------- |
+| returns.id                     | UUID v7 | Client-generated, with `request_hash`                             |
+| returns.status                 | enum    | `pending_approval` \| `completed` \| `rejected`                   |
+| returns.refund_method          | TEXT    | `original` \| `store_credit` \| `payment_method`                  |
+| return_lines.condition         | enum    | `resellable` \| `opened` \| `damaged` \| `defective` \| `expired` |
+| return_lines.restock           | BOOLEAN | Condition is in the store's `restockable_conditions`              |
+| return_lines.stock_movement_id | UUID    | Set only for restocked lines                                      |
 
 ---
 

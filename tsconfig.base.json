@@ -29,7 +29,8 @@
       "@atlas/ui": ["libs/shared/ui/src/index.ts"],
       "@atlas/ui-core": ["packages/atlas-ui/core/src/index.ts"],
       "@atlas/ui-app": ["packages/atlas-ui/app/src/index.ts"],
-      "@atlas/ui-web": ["packages/atlas-ui/web/src/index.ts"]
+      "@atlas/ui-web": ["packages/atlas-ui/web/src/index.ts"],
+      "@atlas/ui-auth": ["packages/atlas-ui/auth/src/index.ts"]
     }
   }
 }

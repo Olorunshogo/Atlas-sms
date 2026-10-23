@@ -16,6 +16,7 @@
     "@atlas/composables": "workspace:*",
     "@atlas/theme": "workspace:*",
     "@atlas/ui": "workspace:*",
+    "@atlas/ui-auth": "workspace:*",
     "@atlas/ui-core": "workspace:*",
     "@atlas/ui-web": "workspace:*",
     "@atlas/validation": "workspace:*",

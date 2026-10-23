@@ -6,12 +6,18 @@ export type {
   InProcessResponse,
 } from './fetch-adapter';
 export type { AtlasClientOptions, AtlasRequestConfig } from './client';
-export { isSuccess, normalizeBody } from './envelope';
+export {
+  EMAIL_NOT_VERIFIED,
+  isEmailNotVerified,
+  isSuccess,
+  normalizeBody,
+} from './envelope';
 export type {
   ApiBody,
   ApiFailure,
   ApiResult,
   ApiSuccess,
+  IssuedSession,
   SessionProfile,
   SessionUser,
   StoreRecord,

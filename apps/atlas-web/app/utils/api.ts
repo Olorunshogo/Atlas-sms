@@ -1,11 +1,13 @@
-import { useRequestHeaders } from '#app';
+import { tryUseNuxtApp, useRequestHeaders, useState, type NuxtApp } from '#app';
 import {
   atlasRequest,
   createAtlasClient,
   createFetchAdapter,
+  isEmailNotVerified,
   isSuccess,
   type ApiResult,
   type InProcessFetch,
+  type SessionProfile,
 } from '@atlas/api';
 
 export type {
@@ -22,6 +24,8 @@ export type {
 
 export { isSuccess };
 
+export const SESSION_STATE_KEY = 'atlas-session';
+
 const marketingClient = createAtlasClient({
   baseURL: '/api',
   clientType: 'web',
@@ -33,10 +37,32 @@ export async function apiRequest<T>(
   path: string,
   init?: { method?: string; body?: unknown },
 ): Promise<ApiResult<T>> {
-  return atlasRequest<T>(marketingClient, {
+  // Taken before the first await, while the Nuxt context is still set
+  const nuxtApp = tryUseNuxtApp();
+  const result = await atlasRequest<T>(marketingClient, {
     url: path,
     method: init?.method ?? 'GET',
     data: init?.body,
+  });
+  if (nuxtApp && isEmailNotVerified(result)) {
+    flagSessionUnverified(nuxtApp);
+  }
+  return result;
+}
+
+/**
+ * Any tenant call refused for an unverified account flips the session, so the dashboard gate shows
+ * even if the profile was loaded before the account changed.
+ */
+function flagSessionUnverified(nuxtApp: NuxtApp): void {
+  nuxtApp.runWithContext(() => {
+    const profile = useState<SessionProfile | null>(SESSION_STATE_KEY);
+    if (profile.value?.user.email_verified) {
+      profile.value = {
+        ...profile.value,
+        user: { ...profile.value.user, email_verified: false },
+      };
+    }
   });
 }
 

@@ -1,8 +1,10 @@
 import {
   atlasRequest,
   createAtlasClient,
+  isEmailNotVerified,
   isSuccess,
   type ApiResult,
+  type IssuedSession,
 } from '@atlas/api';
 import { clearPosSession, posSession, rememberSession } from './session';
 
@@ -11,6 +13,7 @@ export type {
   ApiFailure,
   ApiResult,
   ApiSuccess,
+  IssuedSession,
   SessionProfile,
   SessionUser,
   StoreRecord,
@@ -18,13 +21,6 @@ export type {
 } from '@atlas/api';
 
 export { isSuccess };
-
-interface IssuedSession {
-  access_token?: string;
-  refresh_token?: string;
-  tenant_id: string;
-  user: { full_name: string };
-}
 
 const apiBase =
   (import.meta.env.VITE_ATLAS_API_BASE as string | undefined) ??
@@ -60,21 +56,10 @@ async function performRefresh(): Promise<boolean> {
     atlasAuth: false,
   });
 
-  if (
-    !isSuccess(result.body) ||
-    !result.body.data.access_token ||
-    !result.body.data.refresh_token
-  ) {
+  if (!isSuccess(result.body) || !rememberSession(result.body.data)) {
     clearPosSession();
     return false;
   }
-
-  rememberSession({
-    accessToken: result.body.data.access_token,
-    refreshToken: result.body.data.refresh_token,
-    tenantId: result.body.data.tenant_id,
-    userName: result.body.data.user.full_name,
-  });
   return true;
 }
 
@@ -90,10 +75,15 @@ export async function posRequest<T>(
   path: string,
   init?: { method?: string; body?: unknown; auth?: boolean },
 ): Promise<ApiResult<T>> {
-  return atlasRequest<T>(posClient, {
+  const result = await atlasRequest<T>(posClient, {
     url: path,
     method: init?.method ?? 'GET',
     data: init?.body,
     atlasAuth: init?.auth,
   });
+  // App.vue sends the till back to the verify screen when this flips
+  if (isEmailNotVerified(result)) {
+    posSession.emailVerified = false;
+  }
+  return result;
 }

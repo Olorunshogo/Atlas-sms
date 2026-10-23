@@ -154,7 +154,13 @@ async fn store_scoped_staff_only_see_their_own_store(pool: PgPool) {
     assert_eq!(get(&router, &format!("/api/v1/stock/movements?store_id={}", abuja), &as_user(&cashier)).await.0, StatusCode::FORBIDDEN);
 
     // Someone with no stock.view anywhere gets a 403 as well.
-    let nobody = issue_token(Uuid::now_v7(), tenant_id);
+    let nobody_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO atlas.users (id, full_name, email, password_hash, is_email_verified) VALUES ($1, 'No Grants', 'nobody@example.com', 'not-a-real-hash', true)")
+        .bind(nobody_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let nobody = issue_token(nobody_id, tenant_id);
     for path in ["/api/v1/stock/inventory".to_string(), format!("/api/v1/stock/products/{}", rice), "/api/v1/stock/movements".to_string()] {
         assert_eq!(get(&router, &path, &as_user(&nobody)).await.0, StatusCode::FORBIDDEN, "{}", path);
     }

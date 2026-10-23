@@ -1,0 +1,19 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "composite": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    /**
+     * Resolve the other workspace packages through node_modules rather than
+     * the base path aliases, so this isolated build doesn't pull their
+     * sources into its own rootDir (TS6059/TS6307), same as ui-web.
+     */
+    "paths": {}
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue"],
+  "exclude": ["src/**/*.spec.ts", "src/test/**"]
+}

@@ -21,6 +21,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     return Router::new()
         .route("/signup", post(handlers::signup))
         .route("/verify-email", post(handlers::verify_email))
+        .route("/resend-verification", post(handlers::resend_verification))
         .route("/login", post(handlers::login))
         .route("/me", get(handlers::get_session))
         .route("/refresh", post(handlers::refresh))

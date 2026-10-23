@@ -1,9 +1,16 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router';
 import type { RouteRecordRaw } from 'vue-router';
-import { signedIn } from '../auth/session';
+import { posSession, signedIn } from '../auth/session';
+
+const VERIFY_PATH = '/auth/verify-email';
 
 const routes: RouteRecordRaw[] = [
   { path: '/auth/login', component: () => import('../pages/LoginPage.vue') },
+  {
+    path: VERIFY_PATH,
+    component: () => import('../pages/VerifyEmailPage.vue'),
+    meta: { requiresAuth: true },
+  },
   {
     path: '/',
     component: () => import('../pages/HomePage.vue'),
@@ -17,10 +24,13 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  if (to.meta.requiresAuth && !signedIn()) {
-    return '/auth/login';
+  if (!signedIn()) {
+    return to.meta.requiresAuth ? '/auth/login' : true;
   }
-  if (to.path === '/auth/login' && signedIn()) {
+  if (!posSession.emailVerified) {
+    return to.path === VERIFY_PATH ? true : VERIFY_PATH;
+  }
+  if (to.path === '/auth/login' || to.path === VERIFY_PATH) {
     return '/';
   }
   return true;

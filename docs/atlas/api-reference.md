@@ -147,7 +147,8 @@ exceeded). Full flow and cookie details: [auth-flow.md](auth-flow.md).
   "user": {
     "id": "0192...",
     "full_name": "Ada Obi",
-    "email": "ada@example.com"
+    "email": "ada@example.com",
+    "email_verified": true
   }
 }
 ```
@@ -159,6 +160,7 @@ as `access_token` / `refresh_token` HttpOnly cookies instead.
 | ----------------------------------- | -------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
 | `POST /auth/signup`                 | none           | `{ full_name, email, phone, password, tenant_name }`               | `{ email }`, status `201`; emails an OTP                          |
 | `POST /auth/verify-email`           | none           | `{ email, code }`                                                  | `null`; activates the owner grant                                 |
+| `POST /auth/resend-verification`    | none           | `{ email }`                                                        | `null`; same answer for any email, one code a minute (`429`)      |
 | `POST /auth/login`                  | none           | `{ email, password, tenant_id? }`                                  | session                                                           |
 | `POST /auth/refresh`                | refresh token  | `{ refresh_token }` (app) or empty with cookie (web)               | session (refresh token rotated)                                   |
 | `POST /auth/logout`                 | refresh token  | same as refresh                                                    | `null`; revokes the refresh token                                 |
@@ -170,10 +172,18 @@ as `access_token` / `refresh_token` HttpOnly cookies instead.
 | `GET /auth/platform/tenants`        | platform grant | -                                                                  | `[{ id, name }]`                                                  |
 | `POST /auth/platform/invite`        | platform grant | `{ email }`                                                        | `null`                                                            |
 
+**Unverified accounts.** An owner who signed up but hasn't verified can
+log in: the session has `user.email_verified: false` and points at their
+own new tenant. `/auth/*` keeps working, but every other endpoint answers
+`403 EMAIL_NOT_VERIFIED` until `verify-email` succeeds. The check reads the
+account on each request rather than the token, so the same session works
+the moment the user verifies. Invited staff are verified on acceptance.
+
 Auth-specific errors:
 
 - `400 EMAIL_ALREADY_REGISTERED` on signup.
-- `400 EMAIL_NOT_VERIFIED` on login.
+- `400 EMAIL_NOT_VERIFIED` on signup when the email has an unverified account (log in, or resend the code).
+- `403 EMAIL_NOT_VERIFIED` on any tenant-scoped endpoint for an unverified account.
 - `409 TENANT_REQUIRED` / `PLATFORM_TENANT_REQUIRED` on login when the user belongs to more than one tenant: the error body carries `data: { tenants: [{ id, name }] }`; retry with `tenant_id`.
 - `409 ROLE_NOT_FOUND` when the account has no active role in any tenant; `403` when `tenant_id` names a tenant the user has no active role in.
 
@@ -1877,7 +1887,7 @@ Returns the notification. `404` when it isn't in the caller's inbox.
 | Code                             | Status      | Meaning / what the client should do                                                                   |
 | -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
 | `EMAIL_ALREADY_REGISTERED`       | 400         | Signup with an email in use. Offer login.                                                             |
-| `EMAIL_NOT_VERIFIED`             | 400         | Login before verifying. Offer the OTP step.                                                           |
+| `EMAIL_NOT_VERIFIED`             | 400/403     | Account not verified: signup again (400) or any tenant endpoint (403). Show the verify step.          |
 | `TENANT_REQUIRED`                | 409         | User belongs to several tenants; pick one from `data.tenants` and log in again.                       |
 | `PLATFORM_TENANT_REQUIRED`       | 409         | Same, for platform staff.                                                                             |
 | `ROLE_NOT_FOUND`                 | 409         | The account has no active role in any tenant.                                                         |

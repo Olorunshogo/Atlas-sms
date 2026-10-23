@@ -1,6 +1,8 @@
 import { createApp } from 'vue';
 import { IonicVue } from '@ionic/vue';
+import { installAuthClient } from '@atlas/ui-auth';
 import App from './App.vue';
+import { posRequest } from './auth/api';
 import router from './router';
 
 /* Ionic core CSS - required before any Ion* component renders */
@@ -17,6 +19,11 @@ import '@ionic/vue/css/typography.css';
 import './assets/css/main.css';
 
 const app = createApp(App).use(IonicVue).use(router);
+
+// The shared auth forms only reach public auth endpoints, so they never send the bearer token
+installAuthClient(app, {
+  request: (path, init) => posRequest(path, { ...init, auth: false }),
+});
 
 router.isReady().then(() => {
   app.mount('#app');

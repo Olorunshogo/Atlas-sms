@@ -1,0 +1,41 @@
+{
+  "name": "@atlas/ui-auth",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "dist/**"
+  ],
+  "scripts": {
+    "build": "tsup && vue-tsc -p tsconfig.lib.json --emitDeclarationOnly",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "vue-tsc -p tsconfig.lib.json --noEmit"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.38"
+  },
+  "dependencies": {
+    "@atlas/api": "workspace:*",
+    "@atlas/validation": "workspace:*",
+    "vee-validate": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.6",
+    "typescript": "~5.9.2",
+    "unplugin-vue": "^7.2.0",
+    "vue": "3.5.39",
+    "vue-tsc": "3.3.6"
+  },
+  "nx": {
+    "tags": [
+      "type:ui-platform"
+    ]
+  }
+}

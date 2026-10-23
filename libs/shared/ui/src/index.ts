@@ -1,6 +1,10 @@
 export {
+  MODAL_FIELD_SELECTOR,
+  motionTokens,
   playDialogEnter,
   playDialogExit,
+  playModalContentExit,
+  playModalFieldsEnter,
   revealOnScroll,
   registerScrollTrigger,
 } from './motion/presets';
@@ -22,6 +26,9 @@ export { default as DialogProvider } from './dialog/DialogProvider.vue';
 export { default as DialogHeader } from './dialog/DialogHeader.vue';
 export { default as DialogErrorBanner } from './dialog/DialogErrorBanner.vue';
 export { default as DialogSuccessPanel } from './dialog/DialogSuccessPanel.vue';
+export { default as Modal } from './dialog/Modal.vue';
+export { useModal } from './dialog/use-modal';
+export type { UseModal, UseModalOptions } from './dialog/use-modal';
 
 export type {
   BulkAction,

@@ -26,9 +26,15 @@ Consumes the OTP, sets `users.is_email_verified = true`, and activates every
 `pending` role grant the user holds (in practice, exactly the one signup
 created).
 
+`POST /api/v1/auth/resend-verification { email }` sends a fresh code, at
+most one a minute per account (`429` otherwise). It gives the same answer
+for unknown, verified and unverified emails.
+
 ### 3. Login - `POST /api/v1/auth/login`
 
-Verifies the password, then picks a tenant. Store-scoped grants count:
+Verifies the password, then picks a tenant. An unverified owner can log
+in: their own `pending` signup grant counts as a tenant choice, and the
+session carries `user.email_verified: false`. Store-scoped grants count:
 a cashier's `role_grants.tenant_id` is set even though `scope` is `store`.
 One tenant logs the user in. More than one returns `409 TENANT_REQUIRED`
 with `{ data: { tenants: [{ id, name }] } }` until the body names
@@ -51,7 +57,11 @@ finds a revoked row.
 Every tenant-scoped handler takes a `TenantTx`, which requires a verified
 `Authorization: Bearer <token>` JWT (never a raw header) and exposes
 `user_id`/`tenant_id` from its claims, plus an optional `x-store-id` header
-for store selection. `AdminTx` is the narrow, explicit bypass for pre-tenant
+for store selection. It also refuses an unverified account with
+`403 EMAIL_NOT_VERIFIED`. That is read from `users` on every request rather
+than from the token, so a session works the moment its user verifies, and
+endpoints with no permission check of their own are closed too. `/auth/*`
+runs on `AdminTx` and stays open. `AdminTx` is the narrow, explicit bypass for pre-tenant
 operations.
 
 ---

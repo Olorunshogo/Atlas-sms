@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { usePageSeo } from '../../composables/use-page-seo';
-import { AppLogo, DataTable, type RowAction, type TableColumn } from '@atlas/ui';
+import {
+  AppLogo,
+  DataTable,
+  type RowAction,
+  type TableColumn,
+} from '@atlas/ui';
 import { DashboardFrame } from '@atlas/ui-web';
-import { apiRequest, isSuccess, type StoreRecord } from '../../utils/api';
+import type { StoreRecord } from '../../utils/api';
 
-definePageMeta({ middleware: 'auth' });
+definePageMeta({ layout: 'dashboard', middleware: 'auth' });
 
 usePageSeo({
   title: 'Dashboard',
@@ -71,9 +76,8 @@ const storeActions: RowAction<StoreRecord>[] = [
   },
 ];
 const switchError = ref<string>('');
-const inviteEmail = ref<string>('');
+const inviteOpen = ref<boolean>(false);
 const inviteMessage = ref<string>('');
-const inviteError = ref<string>('');
 
 const selectedTenant = computed((): string => {
   return session.profile.value?.tenant_id ?? '';
@@ -97,19 +101,9 @@ async function onStoreChange(event: Event): Promise<void> {
   await session.selectStore(target.value);
 }
 
-async function sendPlatformInvite(): Promise<void> {
+function openInvite(): void {
   inviteMessage.value = '';
-  inviteError.value = '';
-  const result = await apiRequest<unknown>('v1/auth/platform/invite', {
-    method: 'POST',
-    body: { email: inviteEmail.value },
-  });
-  if (!isSuccess(result.body)) {
-    inviteError.value = result.body.message;
-    return;
-  }
-  inviteMessage.value = result.body.message;
-  inviteEmail.value = '';
+  inviteOpen.value = true;
 }
 </script>
 
@@ -192,32 +186,21 @@ async function sendPlatformInvite(): Promise<void> {
       class="border-border-soft flex flex-col gap-4 rounded-3xl border p-6"
     >
       <h2 class="text-xl font-semibold">Invite platform staff</h2>
-      <p class="text-ink-secondary">
-        Only platform admins can add another. A new email gets an invite link.
-        An existing account gets the grant immediately.
-      </p>
-      <form
-        class="flex flex-col gap-3 sm:flex-row"
-        @submit.prevent="sendPlatformInvite"
+      <p class="text-ink-secondary">Only platform admins can add another.</p>
+      <button
+        type="button"
+        class="bg-brand text-ink-inverse w-fit rounded-full px-4 py-3 text-sm font-semibold"
+        @click="openInvite"
       >
-        <input
-          v-model="inviteEmail"
-          type="email"
-          required
-          placeholder="Email"
-          class="border-border-soft flex-1 rounded-full border px-4 py-3"
-        />
-        <button
-          type="submit"
-          class="bg-brand text-ink-inverse rounded-full px-4 py-3 text-sm font-semibold"
-        >
-          Send invite
-        </button>
-      </form>
-      <p v-if="inviteError" class="text-danger text-sm">{{ inviteError }}</p>
+        Invite platform staff
+      </button>
       <p v-if="inviteMessage" class="text-success text-sm">
         {{ inviteMessage }}
       </p>
+      <InvitePlatformStaffModal
+        v-model:open="inviteOpen"
+        @invited="inviteMessage = $event"
+      />
     </section>
 
     <section class="flex flex-col gap-4">

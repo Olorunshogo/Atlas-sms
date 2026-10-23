@@ -116,6 +116,34 @@ async fn authed_post(router: &Router, path: &str, token: &str, body: Value) -> (
     return send(router, request).await;
 }
 
+async fn authed_get(router: &Router, path: &str, token: &str) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("authorization", format!("Bearer {}", token))
+        .header("x-client-type", "app")
+        .body(Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+    return send(router, request).await;
+}
+
+async fn signup(router: &Router, address: &str) {
+    let (status, _) = post(
+        router,
+        "/api/v1/auth/signup",
+        json!({
+            "full_name": "Test User",
+            "email": address,
+            "phone": "+2340000000000",
+            "password": "a-fairly-strong-password",
+            "tenant_name": "Test Tenant",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
 async fn signup_and_verify(router: &Router, email: &CapturingEmailProvider, address: &str) {
     let (status, _) = post(
         router,
@@ -193,32 +221,78 @@ async fn login_with_the_wrong_password_is_rejected(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn login_before_verifying_email_is_rejected(pool: PgPool) {
+async fn an_unverified_user_can_log_in_but_tenant_endpoints_stay_closed_until_they_verify(pool: PgPool) {
     let email = CapturingEmailProvider::default();
-    let router = build_router(pool, email);
+    let router = build_router(pool, email.clone());
     let address = "unverified@example.com";
+    signup(&router, address).await;
 
-    let (status, _) = post(
-        &router,
-        "/api/v1/auth/signup",
-        json!({
-            "full_name": "Test User",
-            "email": address,
-            "phone": "+2340000000000",
-            "password": "a-fairly-strong-password",
-            "tenant_name": "Test Tenant",
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
+    let (status, body) = post(&router, "/api/v1/auth/login", json!({ "email": address, "password": "a-fairly-strong-password" })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["user"]["email_verified"], false);
+    let token = body["data"]["access_token"].as_str().unwrap().to_string();
+    let refresh_token = body["data"]["refresh_token"].as_str().unwrap().to_string();
 
-    let (status, _) = post(
-        &router,
-        "/api/v1/auth/login",
-        json!({ "email": address, "password": "a-fairly-strong-password" }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, body) = authed_get(&router, "/api/v1/auth/me", &token).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["user"]["email_verified"], false);
+    assert_eq!(body["data"]["tenants"].as_array().unwrap().len(), 1);
+
+    for path in ["/api/v1/stores", "/api/v1/tenants/me", "/api/v1/notifications"] {
+        let (status, body) = authed_get(&router, path, &token).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{}: {}", path, body);
+        assert_eq!(body["code"], "EMAIL_NOT_VERIFIED", "{}", path);
+    }
+
+    let code = email.last_otp();
+    let (status, _) = post(&router, "/api/v1/auth/verify-email", json!({ "email": address, "code": code })).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The same token works straight away: the gate reads the user, not the token
+    let (status, body) = authed_get(&router, "/api/v1/stores", &token).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let (_, body) = authed_get(&router, "/api/v1/auth/me", &token).await;
+    assert_eq!(body["data"]["user"]["email_verified"], true);
+    let (status, body) = post(&router, "/api/v1/auth/refresh", json!({ "refresh_token": refresh_token })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["user"]["email_verified"], true);
+}
+
+#[sqlx::test]
+async fn resend_verification_sends_at_most_one_code_a_minute_and_reveals_nothing(pool: PgPool) {
+    let email = CapturingEmailProvider::default();
+    let router = build_router(pool.clone(), email.clone());
+    let address = "resend@example.com";
+    signup(&router, address).await;
+    let sent_before = email.sent.lock().unwrap().len();
+
+    // Signup just sent one
+    let (status, _) = post(&router, "/api/v1/auth/resend-verification", json!({ "email": address })).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+
+    sqlx::query("UPDATE atlas.email_otps SET created_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, unknown) = post(&router, "/api/v1/auth/resend-verification", json!({ "email": "nobody@example.com" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(email.sent.lock().unwrap().len(), sent_before);
+
+    let (status, known) = post(&router, "/api/v1/auth/resend-verification", json!({ "email": address })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(known["message"], unknown["message"]);
+    assert_eq!(email.sent.lock().unwrap().len(), sent_before + 1);
+    let (status, body) = post(&router, "/api/v1/auth/verify-email", json!({ "email": address, "code": email.last_otp() })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+
+    // A verified account gets the same answer and no email
+    sqlx::query("UPDATE atlas.email_otps SET created_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = post(&router, "/api/v1/auth/resend-verification", json!({ "email": address })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(email.sent.lock().unwrap().len(), sent_before + 1);
 }
 
 #[sqlx::test]

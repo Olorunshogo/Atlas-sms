@@ -81,6 +81,7 @@ impl ApiError {
 
 /// Machine-readable `code` values for the sales, payments, returns and customer flows, kept here so the POS can switch on one list instead of scattered literals.
 pub mod codes {
+    pub const EMAIL_NOT_VERIFIED: &str = "EMAIL_NOT_VERIFIED";
     pub const PRODUCT_OUT_OF_STOCK: &str = "PRODUCT_OUT_OF_STOCK";
     pub const PRODUCT_NOT_SOLD_HERE: &str = "PRODUCT_NOT_SOLD_HERE";
     pub const PRODUCT_NOT_PRICED: &str = "PRODUCT_NOT_PRICED";
