@@ -14,7 +14,7 @@ use crate::response::ApiEnvelope;
 use crate::roles;
 use crate::validate::{require_visible, required_text};
 
-use super::models::Product;
+use super::models::{Product, PRODUCT_COLUMNS};
 use super::selling::{PriceRule, SaleUnit};
 
 async fn assert_manage(tx: &mut TenantTx) -> Result<(), ApiError> {
@@ -73,10 +73,9 @@ pub async fn create_unit(mut tx: TenantTx, Json(body): Json<CreateUnitRequest>) 
 /// `GET /api/v1/products/:id`.
 pub async fn get_product(Path(product_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<Product>>, ApiError> {
     let tenant_id = tx.tenant_id;
-    let product = sqlx::query_as::<_, Product>(
-        "SELECT id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active, tax_rate_id, is_returnable
-         FROM atlas.products WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL",
-    )
+    let product = sqlx::query_as::<_, Product>(&format!(
+        "SELECT {PRODUCT_COLUMNS} FROM atlas.products WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL"
+    ))
     .bind(product_id)
     .bind(tenant_id)
     .fetch_optional(&mut *tx)
@@ -122,16 +121,31 @@ pub async fn list_price_rules(Path(product_id): Path<Uuid>, mut tx: TenantTx) ->
 pub async fn delete_price_rule(Path((product_id, rule_id)): Path<(Uuid, Uuid)>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<()>>, ApiError> {
     assert_manage(&mut tx).await?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
-    let result = sqlx::query("DELETE FROM atlas.price_rules WHERE id = $1 AND product_id = $2 AND tenant_id = $3")
-        .bind(rule_id)
-        .bind(product_id)
-        .bind(tenant_id)
-        .execute(&mut *tx)
-        .await?;
-    if result.rows_affected() == 0 {
-        return Err(ApiError::not_found("Price rule not found."));
-    }
-    audit::record(&mut tx, tenant_id, user_id, "price_rule", rule_id, "price_rule.delete", None).await?;
+    let rule = sqlx::query_as::<_, PriceRule>(
+        "DELETE FROM atlas.price_rules WHERE id = $1 AND product_id = $2 AND tenant_id = $3
+         RETURNING id, product_id, store_id, customer_group_id, min_quantity, unit_price_amount_minor, priority, starts_at, ends_at",
+    )
+    .bind(rule_id)
+    .bind(product_id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Price rule not found."))?;
+    super::price_history::record_rule_deleted(&mut tx, tenant_id, user_id, &rule).await?;
+    audit::record_change(
+        &mut tx,
+        audit::Change {
+            tenant_id,
+            actor_user_id: user_id,
+            device_id: None,
+            entity_type: "price_rule",
+            entity_id: rule_id,
+            action: "price_rule.delete",
+            before: serde_json::to_value(&rule).ok(),
+            after: None,
+        },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Price rule deleted.", ())));
 }

@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
+use crate::notifications::{self, NotificationKind};
 use crate::response::ApiEnvelope;
 use crate::roles;
 
@@ -109,6 +110,7 @@ pub async fn request_transfer(
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(body.from_store_id), "stock.transfer").await?;
     let transfer = service::request_transfer(&mut tx, tenant_id, user_id, &body).await?;
     audit_transfer(&mut tx, &transfer, "stock_transfer.request").await?;
+    notifications::service::transfer(&mut tx, tenant_id, user_id, transfer.id, NotificationKind::TransferRequested).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Transfer requested.", transfer)));
 }
@@ -138,6 +140,7 @@ pub async fn approve_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
     let transfer = service::approve_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
     audit_transfer(&mut tx, &transfer, "stock_transfer.approve").await?;
+    notifications::service::transfer(&mut tx, tenant_id, user_id, transfer.id, NotificationKind::TransferApproved).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Transfer approved.", transfer)));
 }
@@ -150,6 +153,7 @@ pub async fn reject_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) ->
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
     let transfer = service::reject_transfer(&mut tx, tenant_id, transfer_id).await?;
     audit_transfer(&mut tx, &transfer, "stock_transfer.reject").await?;
+    notifications::service::transfer(&mut tx, tenant_id, user_id, transfer.id, NotificationKind::TransferRejected).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Transfer rejected.", transfer)));
 }
@@ -177,6 +181,7 @@ pub async fn dispatch_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) 
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.from_store_id), "stock.transfer").await?;
     let transfer = service::dispatch_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
     audit_transfer(&mut tx, &transfer, "stock_transfer.dispatch").await?;
+    notifications::service::transfer(&mut tx, tenant_id, user_id, transfer.id, NotificationKind::TransferDispatched).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Transfer dispatched.", transfer)));
 }
@@ -192,6 +197,7 @@ pub async fn receive_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
     let transfer = service::receive_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
     audit_transfer(&mut tx, &transfer, "stock_transfer.receive").await?;
+    notifications::service::transfer(&mut tx, tenant_id, user_id, transfer.id, NotificationKind::TransferReceived).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Transfer received.", transfer)));
 }
@@ -215,12 +221,15 @@ async fn viewable_scope(tx: &mut TenantTx) -> Result<roles::service::StoreScope,
 pub struct InventoryQuery {
     pub store_id: Option<Uuid>,
     pub product_id: Option<Uuid>,
+    pub category_id: Option<Uuid>,
+    /// Name or SKU, case-insensitive substring.
+    pub q: Option<String>,
     #[serde(default)]
     pub low_stock: bool,
 }
 
 /**
- * `GET /api/v1/stock/inventory?store_id=&product_id=&low_stock=`.
+ * `GET /api/v1/stock/inventory?store_id=&product_id=&category_id=&q=&low_stock=`.
  * Every product with its on-hand at each store the caller holds `stock.view` at; `store_id` narrows to one of them, `low_stock` keeps locations at or below their listing's threshold.
  */
 pub async fn get_inventory(mut tx: TenantTx, Query(query): Query<InventoryQuery>) -> Result<Json<ApiEnvelope<Vec<ProductInventory>>>, ApiError> {
@@ -231,7 +240,7 @@ pub async fn get_inventory(mut tx: TenantTx, Query(query): Query<InventoryQuery>
         }
     }
     let tenant_id = tx.tenant_id;
-    let products = service::inventory_by_product(&mut tx, tenant_id, scope.as_filter(), query.store_id, query.product_id, query.low_stock).await?;
+    let products = service::inventory_by_product(&mut tx, tenant_id, scope.as_filter(), query.store_id, query.product_id, query.category_id, query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()), query.low_stock).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Inventory fetched.", products)));
 }

@@ -13,6 +13,7 @@ pub enum MovementType {
     Adjustment,
     TransferOut,
     TransferIn,
+    WriteOff,
 }
 
 impl MovementType {
@@ -26,6 +27,7 @@ impl MovementType {
             MovementType::Adjustment => "adjustment",
             MovementType::TransferOut => "transfer_out",
             MovementType::TransferIn => "transfer_in",
+            MovementType::WriteOff => "write_off",
         };
     }
 
@@ -35,7 +37,7 @@ impl MovementType {
      */
     pub fn signed(self, quantity: Decimal) -> Decimal {
         return match self {
-            MovementType::Sale | MovementType::TransferOut | MovementType::PurchaseReturn => -quantity,
+            MovementType::Sale | MovementType::TransferOut | MovementType::PurchaseReturn | MovementType::WriteOff => -quantity,
             MovementType::Adjustment => quantity,
             MovementType::PurchaseReceipt
             | MovementType::SaleReturn

@@ -1,3 +1,4 @@
+use axum::extract::Query;
 use axum::Json;
 
 use crate::audit;
@@ -6,7 +7,7 @@ use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
 use crate::roles;
 
-use super::models::{CreateProductRequest, CreateProductTypeRequest, Product, ProductType};
+use super::models::{CreateProductRequest, CreateProductTypeRequest, ListProductsQuery, Product, ProductType};
 use super::service;
 
 /**
@@ -52,9 +53,9 @@ pub async fn create_product_type(
  * `GET /api/v1/products`.
  * Tenant-wide visibility; per-store presence and cost live in `product_store_listings`, not filtered here.
  */
-pub async fn list_products(mut tx: TenantTx) -> Result<Json<ApiEnvelope<Vec<Product>>>, ApiError> {
+pub async fn list_products(mut tx: TenantTx, Query(query): Query<ListProductsQuery>) -> Result<Json<ApiEnvelope<Vec<Product>>>, ApiError> {
     let tenant_id = tx.tenant_id;
-    let products = service::list_products(&mut tx, tenant_id).await?;
+    let products = service::list_products(&mut tx, tenant_id, &query).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Products fetched.", products)));
 }

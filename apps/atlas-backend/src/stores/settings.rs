@@ -18,7 +18,8 @@ use crate::roles;
 const SETTINGS_COLUMNS: &str = "id, currency, timezone, prices_include_tax, default_tax_rate_id,
      cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later,
      address, phone, receipt_prefix, receipt_header, receipt_footer, return_window_days,
-     refund_approval_threshold_minor, restockable_conditions::text[] AS restockable_conditions";
+     refund_approval_threshold_minor, restockable_conditions::text[] AS restockable_conditions,
+     allow_expired_sale, expiry_warning_days";
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct StoreSettings {
@@ -43,6 +44,10 @@ pub struct StoreSettings {
     pub refund_approval_threshold_minor: Option<i64>,
     /// Item conditions that go back into saleable stock on return.
     pub restockable_conditions: Vec<String>,
+    /// Lets an expired batch be sold; off, first-expiry-first-out skips it and naming it is refused (FR-14).
+    pub allow_expired_sale: bool,
+    /// How many days ahead of expiry a batch shows as near expiry.
+    pub expiry_warning_days: i32,
 }
 
 fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -72,6 +77,8 @@ pub struct UpdateStoreSettingsRequest {
     #[serde(default, deserialize_with = "explicit_null")]
     pub refund_approval_threshold_minor: Option<Option<i64>>,
     pub restockable_conditions: Option<Vec<String>>,
+    pub allow_expired_sale: Option<bool>,
+    pub expiry_warning_days: Option<i32>,
 }
 
 /// `GET /api/v1/stores/:id/settings`. Requires `sale.create` or `store.update` at the store.
@@ -98,6 +105,9 @@ pub async fn update_settings(
     }
     if body.max_cashier_discount_basis_points.is_some_and(|v| !(0..=10_000).contains(&v)) {
         return Err(ApiError::bad_request("max_cashier_discount_basis_points must be between 0 and 10000"));
+    }
+    if body.expiry_warning_days.is_some_and(|v| v < 0) {
+        return Err(ApiError::bad_request("expiry_warning_days must not be negative"));
     }
     if body.return_window_days.is_some_and(|v| v < 0) {
         return Err(ApiError::bad_request("return_window_days must not be negative"));
@@ -128,6 +138,8 @@ pub async fn update_settings(
              return_window_days = COALESCE($14, return_window_days),
              refund_approval_threshold_minor = CASE WHEN $15 THEN $16 ELSE refund_approval_threshold_minor END,
              restockable_conditions = COALESCE($17::atlas.item_condition[], restockable_conditions),
+             allow_expired_sale = COALESCE($18, allow_expired_sale),
+             expiry_warning_days = COALESCE($19, expiry_warning_days),
              updated_at = now()
          WHERE id = $1",
     )
@@ -148,6 +160,8 @@ pub async fn update_settings(
     .bind(body.refund_approval_threshold_minor.is_some())
     .bind(body.refund_approval_threshold_minor.flatten())
     .bind(&body.restockable_conditions)
+    .bind(body.allow_expired_sale)
+    .bind(body.expiry_warning_days)
     .execute(&mut *tx)
     .await?;
 

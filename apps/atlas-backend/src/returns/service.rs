@@ -344,15 +344,19 @@ async fn complete_return(
     let lines = list_lines(conn, return_id).await?;
     let restocked: Vec<&ReturnLine> = lines.iter().filter(|l| l.restock).collect();
     if !restocked.is_empty() {
-        let posting_lines: Vec<PostingLine> = restocked
-            .iter()
-            .map(|line| PostingLine {
+        let mut posting_lines: Vec<PostingLine> = Vec::with_capacity(restocked.len());
+        for line in &restocked {
+            let stock_item_id = match line.stock_item_id {
+                Some(id) => Some(id),
+                None => inventory::batches::sold_batch(conn, sale.id, line.product_id).await?,
+            };
+            posting_lines.push(PostingLine {
                 product_id: line.product_id,
-                stock_item_id: line.stock_item_id,
+                stock_item_id,
                 unit_id: Some(line.unit_id),
                 quantity: line.quantity,
-            })
-            .collect();
+            });
+        }
         let movements = inventory::service::post(
             conn,
             Posting {
@@ -375,6 +379,31 @@ async fn complete_return(
                 .execute(&mut *conn)
                 .await?;
         }
+    }
+
+    // Not restocked means unsellable: kept on record apart from saleable stock (FR-14)
+    for line in lines.iter().filter(|l| !l.restock) {
+        let stock_item_id = match line.stock_item_id {
+            Some(id) => Some(id),
+            None => inventory::batches::sold_batch(conn, sale.id, line.product_id).await?,
+        };
+        sqlx::query(
+            "INSERT INTO atlas.unsellable_stock
+                (id, tenant_id, store_id, product_id, stock_item_id, quantity, condition, source, reference_id, reason, recorded_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::atlas.item_condition, 'sale_return', $8, $9, $10)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(tenant_id)
+        .bind(sale.store_id)
+        .bind(line.product_id)
+        .bind(stock_item_id)
+        .bind(line.base_quantity)
+        .bind(&line.condition)
+        .bind(return_id)
+        .bind(format!("Return {}", return_number))
+        .bind(executor_id)
+        .execute(&mut *conn)
+        .await?;
     }
 
     let shift_id = payments::open_shift_at(conn, sale.store_id).await?;

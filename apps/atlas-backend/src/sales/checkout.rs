@@ -5,7 +5,10 @@
  * decides what happens to a policy problem - live refuses, sync records and
  * accepts, because an offline sale has already happened.
  */
+use std::collections::BTreeMap;
+
 use chrono::Utc;
+use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -21,7 +24,7 @@ use crate::pricing::models::{Quote, StorePricing, Violation};
 use crate::pricing::quote::{self, QuoteContext};
 use crate::pricing::resolver;
 
-use super::models::{CreateSaleRequest, PaymentInputStatus, Sale, SaleDetail};
+use super::models::{CreateSaleRequest, PaymentInputStatus, Sale, SaleDetail, SaleLine};
 use super::{receipts, service};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,15 +203,7 @@ pub async fn complete_sale(
     receipts::issue(conn, tenant_id, sale_id).await?;
     let sale = service::get_sale(conn, sale_id).await?;
     let lines = service::list_sale_lines(conn, sale_id).await?;
-    let posting_lines: Vec<PostingLine> = lines
-        .iter()
-        .map(|line| PostingLine {
-            product_id: line.product_id,
-            stock_item_id: line.stock_item_id,
-            unit_id: Some(line.unit_id),
-            quantity: line.quantity,
-        })
-        .collect();
+    let posting_lines = allocate_lines(conn, sale.store_id, &lines, policy).await?;
     inventory::service::post(
         conn,
         Posting {
@@ -230,6 +225,55 @@ pub async fn complete_sale(
         .execute(&mut *conn)
         .await?;
     return Ok(());
+}
+
+/**
+ * Turns sale lines into stock postings (FR-14). A named batch must be sellable; a batch-tracked product with no batch named is split across its batches first-expiry-first-out.
+ * A shortfall is refused under `Reject`, otherwise posted against the product's unbatched stock - the posting's own check can't see it, since expired batches still count toward product-wide on-hand.
+ */
+async fn allocate_lines(conn: &mut PgConnection, store_id: Uuid, lines: &[SaleLine], policy: NegativeStockPolicy) -> Result<Vec<PostingLine>, ApiError> {
+    let allow_expired = inventory::batches::allow_expired_sale(conn, store_id).await?;
+    let mut posting_lines = Vec::with_capacity(lines.len());
+    let mut fefo: BTreeMap<Uuid, Decimal> = BTreeMap::new();
+    for line in lines {
+        if let Some(stock_item_id) = line.stock_item_id {
+            inventory::batches::assert_sellable(conn, store_id, stock_item_id, allow_expired).await?;
+        } else if inventory::batches::tracks_batches(conn, line.product_id).await? {
+            let factor = inventory::service::unit_factor(conn, line.product_id, line.unit_id).await?;
+            *fefo.entry(line.product_id).or_default() += line.quantity * factor;
+            continue;
+        }
+        posting_lines.push(PostingLine {
+            product_id: line.product_id,
+            stock_item_id: line.stock_item_id,
+            unit_id: Some(line.unit_id),
+            quantity: line.quantity,
+        });
+    }
+
+    let product_ids: Vec<Uuid> = fefo.keys().copied().collect();
+    inventory::service::lock_products(conn, store_id, &product_ids).await?;
+    for (product_id, quantity) in fefo {
+        let (allocations, remainder) = inventory::batches::allocate_fefo(conn, store_id, product_id, quantity, allow_expired).await?;
+        if remainder > Decimal::ZERO && policy == NegativeStockPolicy::Reject {
+            return Err(ApiError::conflict_with_code(
+                format!(
+                    "Not enough sellable stock for product {}: requested {}, available {}.",
+                    product_id,
+                    quantity.normalize(),
+                    (quantity - remainder).normalize()
+                ),
+                codes::PRODUCT_OUT_OF_STOCK,
+            ));
+        }
+        for (stock_item_id, take) in allocations {
+            posting_lines.push(PostingLine { product_id, stock_item_id, unit_id: None, quantity: take });
+        }
+        if remainder > Decimal::ZERO {
+            posting_lines.push(PostingLine { product_id, stock_item_id: None, unit_id: None, quantity: remainder });
+        }
+    }
+    return Ok(posting_lines);
 }
 
 /// The shift must belong to the sale's store. A live sale also needs it open; a synced sale may land after its shift closed, since it was rung up while the shift was open.

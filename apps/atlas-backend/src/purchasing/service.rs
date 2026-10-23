@@ -289,22 +289,23 @@ pub async fn record_purchase_return(
     let mut total_cost_owed_minor: i64 = 0;
 
     for line in &payload.lines {
-        let (product_id, quantity_received, quantity_returned_so_far, unit_cost_amount_minor): (
+        let (product_id, quantity_received, quantity_returned_so_far, unit_cost_amount_minor, received_stock_item_id): (
             Uuid,
             Decimal,
             Decimal,
             i64,
+            Option<Uuid>,
         ) = sqlx::query_as(
-            "SELECT grn.quantity_received, grn.quantity_returned, pol.product_id, pol.unit_cost_amount_minor
+            "SELECT pol.product_id, grn.quantity_received, grn.quantity_returned, pol.unit_cost_amount_minor, m.stock_item_id
              FROM atlas.goods_received_note_lines grn
              JOIN atlas.purchase_order_lines pol ON pol.id = grn.purchase_order_line_id
+             LEFT JOIN atlas.stock_movements m ON m.id = grn.stock_movement_id
              WHERE grn.id = $1 AND pol.purchase_order_id = $2",
         )
         .bind(line.goods_received_note_line_id)
         .bind(payload.purchase_order_id)
         .fetch_optional(&mut *conn)
         .await?
-        .map(|(a, b, c, d): (Decimal, Decimal, Uuid, i64)| (c, a, b, d))
         .ok_or_else(|| ApiError::bad_request("Unknown goods received note line for this purchase order."))?;
 
         let remaining = quantity_received - quantity_returned_so_far;
@@ -317,7 +318,7 @@ pub async fn record_purchase_return(
 
         let posting_lines = [PostingLine {
             product_id,
-            stock_item_id: None,
+            stock_item_id: received_stock_item_id,
             unit_id: None,
             quantity: line.quantity,
         }];
@@ -448,9 +449,21 @@ pub async fn receive_goods(
             )));
         }
 
+        let stock_item_id = match line.batch_number.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+            Some(batch_number) => {
+                if !inventory::batches::tracks_batches(conn, product_id).await? {
+                    return Err(ApiError::bad_request_with_code("This product isn't batch-tracked; leave batch_number out.", "VALIDATION_FAILED"));
+                }
+                Some(inventory::batches::find_or_create_batch(conn, tenant_id, product_id, batch_number, line.expiry_date).await?)
+            }
+            None => {
+                inventory::batches::check_batch_given(conn, product_id, None).await?;
+                None
+            }
+        };
         let receipt_lines = [PostingLine {
             product_id,
-            stock_item_id: None,
+            stock_item_id,
             unit_id: None,
             quantity: line.quantity_received,
         }];

@@ -99,18 +99,23 @@ CI gets wired when that work happens, not before.
   it is not what Pinia is for here.
 - Capacitor secure storage for the POS refresh token. It is memory-only today.
 - A screen for custom roles. Invite of a seeded role is built.
-- `module_toggles` has no HTTP API yet. Price rules can be created
-  (`POST /api/v1/products/{id}/price-rules`) but not edited or deleted.
+- `module_toggles` has no HTTP API yet. Price rules can be created and
+  deleted but not edited in place; a change is a new rule, recorded in
+  `GET /api/v1/products/{id}/price-history`.
 - No payment gateway: a `pending` card or transfer payment is confirmed
   by a person (`POST /api/v1/payments/{id}/status`), not a webhook.
   Store credit can be refunded to but not yet spent at checkout.
-- Purchase orders (FR-21) can be created and received but not edited
-  before approval, submitted, formally approved, or cancelled - only
-  `create` and `receive` exist. Purchase returns to a supplier (FR-23)
-  have no endpoint at all yet. Inter-store transfers (FR-22) are done:
-  staged `request -> approve/reject -> dispatch -> receive/cancel` under
-  `/api/v1/stock/transfers`, stock leaving the source only at dispatch and
-  arriving at the destination only at receive.
+- SRS v1.0 sections 3-7 have backend coverage for FR-07 to FR-14 and
+  FR-21 to FR-24 and FR-26: categories and variants, price history,
+  physical counts, batches with first-expiry-first-out and expiry views,
+  unsellable stock, the purchase order lifecycle, purchase returns,
+  staged transfers, expenses, and in-app notifications. See
+  `api-reference.md` sections 6, 8, 9, 9b and 16b. Not built: email/SMS
+  notification delivery (FR-26 calls it optional), price-change approval
+  thresholds (FR-09 "any configured"), and FR-25/27-30 have not been
+  re-audited against the SRS.
+- A batch-tracked transfer must name its batch; transfers don't allocate
+  first-expiry-first-out the way sales do.
 - No CI workflow. See item 8.
 
 ## The online storefront (approved, not yet built)

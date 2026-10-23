@@ -72,6 +72,9 @@ pub struct ListPurchaseOrdersQuery {
 pub struct ReceiveLineInput {
     pub purchase_order_line_id: Uuid,
     pub quantity_received: rust_decimal::Decimal,
+    /// Required for batch-tracked products (FR-14); a batch number seen before tops that batch up.
+    pub batch_number: Option<String>,
+    pub expiry_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, Deserialize)]

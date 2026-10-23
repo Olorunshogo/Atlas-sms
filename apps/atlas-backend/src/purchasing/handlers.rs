@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
+use crate::notifications;
 use crate::response::ApiEnvelope;
 use crate::roles;
 
@@ -200,6 +201,7 @@ pub async fn submit_purchase_order(Path(purchase_order_id): Path<Uuid>, mut tx: 
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "purchase.create").await?;
     let order = service::submit_purchase_order(&mut tx, tenant_id, purchase_order_id).await?;
     audit::record(&mut tx, tenant_id, user_id, "purchase_order", order.id, "purchase_order.submit", serde_json::to_value(&order).ok()).await?;
+    notifications::service::purchase_order_submitted(&mut tx, tenant_id, user_id, order.id).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Purchase order submitted.", order)));
 }

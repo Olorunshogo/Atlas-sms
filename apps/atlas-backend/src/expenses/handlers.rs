@@ -4,6 +4,7 @@ use axum::Json;
 use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
+use crate::notifications::{self, NotificationKind};
 use crate::response::ApiEnvelope;
 use crate::roles;
 use uuid::Uuid;
@@ -80,6 +81,7 @@ pub async fn submit_expense(Path(expense_id): Path<Uuid>, mut tx: TenantTx) -> R
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.store_id), "expense.manage").await?;
     let expense = service::submit_expense(&mut tx, tenant_id, expense_id).await?;
     audit::record(&mut tx, tenant_id, user_id, "expense", expense.id, "expense.submit", serde_json::to_value(&expense).ok()).await?;
+    notifications::service::expense(&mut tx, tenant_id, user_id, expense.id, NotificationKind::ExpenseSubmitted).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Expense submitted.", expense)));
 }
@@ -91,6 +93,7 @@ pub async fn approve_expense(Path(expense_id): Path<Uuid>, mut tx: TenantTx) -> 
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.store_id), "expense.manage").await?;
     let expense = service::approve_expense(&mut tx, tenant_id, user_id, expense_id).await?;
     audit::record(&mut tx, tenant_id, user_id, "expense", expense.id, "expense.approve", serde_json::to_value(&expense).ok()).await?;
+    notifications::service::expense(&mut tx, tenant_id, user_id, expense.id, NotificationKind::ExpenseApproved).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Expense approved.", expense)));
 }
@@ -102,6 +105,7 @@ pub async fn reject_expense(Path(expense_id): Path<Uuid>, mut tx: TenantTx) -> R
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.store_id), "expense.manage").await?;
     let expense = service::reject_expense(&mut tx, tenant_id, user_id, expense_id).await?;
     audit::record(&mut tx, tenant_id, user_id, "expense", expense.id, "expense.reject", serde_json::to_value(&expense).ok()).await?;
+    notifications::service::expense(&mut tx, tenant_id, user_id, expense.id, NotificationKind::ExpenseRejected).await;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Expense rejected.", expense)));
 }

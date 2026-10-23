@@ -4,6 +4,7 @@
  * goes through `service::post`, so unit conversion, locking and the
  * negative-stock policy live in exactly one place.
  */
+pub mod batches;
 pub mod models;
 pub mod service;
 

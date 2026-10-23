@@ -150,13 +150,24 @@ async fn an_approved_transfer_can_be_cancelled_but_a_dispatched_one_cannot(pool:
 }
 
 #[sqlx::test]
-async fn adjustments_are_never_blocked_by_the_negative_stock_check(pool: PgPool) {
+async fn adjustments_go_negative_only_when_the_store_allows_it(pool: PgPool) {
     let router = build_router(pool.clone());
     let (token, tenant_id) = signup_owner(&router, &pool, "adjust-owner@example.com").await;
     let store = create_store(&router, &token, "lagos").await;
     let unit = seed_unit(&pool, tenant_id, "Each", "ea").await;
     let product = create_product(&router, &token, unit, "Soap", "SOAP").await;
 
+    let (status, body) = post(
+        &router,
+        "/api/v1/stock/adjustments",
+        &as_user(&token),
+        json!({ "store_id": store, "product_id": product, "stock_item_id": null, "quantity": "-3", "reason": "Write-off" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "PRODUCT_OUT_OF_STOCK");
+
+    store_settings(&router, &token, store, json!({ "allow_negative_stock": true })).await;
     stock_up(&router, &token, store, product, "-3").await;
     assert_eq!(qty(&on_hand(&router, &token, store, product).await), qty("-3"));
     stock_up(&router, &token, store, product, "10").await;

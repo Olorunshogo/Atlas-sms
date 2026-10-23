@@ -286,7 +286,7 @@ async fn load_product(conn: &mut PgConnection, product_id: Uuid, store_id: Uuid)
     .ok_or_else(|| ApiError::bad_request_with_code("Unknown product.", codes::PRODUCT_NOT_SOLD_HERE));
 }
 
-/// Batch- and serial-tracked products must name the stock item being sold, and a serial number is always exactly one unit.
+/// Serial-tracked products must name the unit being sold, one at a time. A batch-only product may leave it out: completion allocates first-expiry-first-out (FR-14).
 async fn check_stock_item(
     conn: &mut PgConnection,
     input: &CartLineInput,
@@ -297,8 +297,11 @@ async fn check_stock_item(
         return Ok(());
     }
     let Some(stock_item_id) = input.stock_item_id else {
+        if product.identity_mode == "by_batch" {
+            return Ok(());
+        }
         return Err(ApiError::bad_request_with_code(
-            format!("line {}: {} needs a batch or serial number.", line_number, product.name),
+            format!("line {}: {} needs a serial number.", line_number, product.name),
             codes::STOCK_ITEM_REQUIRED,
         ));
     };

@@ -19,6 +19,7 @@ mod expenses;
 mod extractors;
 mod inventory;
 mod normalize;
+mod notifications;
 mod payments;
 mod pricing;
 mod products;
@@ -93,8 +94,10 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/purchase-returns", API_PREFIX), purchasing::purchase_returns_router())
         .nest(&format!("{}/expense-categories", API_PREFIX), expenses::categories_router())
         .nest(&format!("{}/expenses", API_PREFIX), expenses::router())
+        .nest(&format!("{}/notifications", API_PREFIX), notifications::router())
         .nest(&format!("{}/roles", API_PREFIX), roles::router())
         .nest(&format!("{}/product-types", API_PREFIX), products::product_types_router())
+        .nest(&format!("{}/product-categories", API_PREFIX), products::categories_router())
         .nest(&format!("{}/products", API_PREFIX), products::router())
         .nest(&format!("{}/stock", API_PREFIX), stock::router())
         .nest(&format!("{}/shifts", API_PREFIX), sales::shifts_router())

@@ -17,7 +17,7 @@ use crate::response::ApiEnvelope;
 use crate::roles;
 use crate::validate::{nothing_to_update, require_visible, required_text};
 
-use super::models::Product;
+use super::models::{Product, PRODUCT_COLUMNS};
 
 /// Tells a field that was sent as `null` (clear it) apart from one that wasn't sent at all (leave it).
 fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -47,6 +47,9 @@ pub struct UpdateProductRequest {
     /// `null` clears it back to the store default rate.
     #[serde(default, deserialize_with = "explicit_null")]
     pub tax_rate_id: Option<Option<Uuid>>,
+    /// `null` takes it out of its category.
+    #[serde(default, deserialize_with = "explicit_null")]
+    pub category_id: Option<Option<Uuid>>,
 }
 
 /// `PATCH /api/v1/products/:id`.
@@ -62,6 +65,7 @@ pub async fn update_product(
         && body.is_active.is_none()
         && body.is_returnable.is_none()
         && body.tax_rate_id.is_none()
+        && body.category_id.is_none()
     {
         return Err(nothing_to_update());
     }
@@ -81,7 +85,11 @@ pub async fn update_product(
     if let Some(Some(tax_rate_id)) = body.tax_rate_id {
         require_visible(&mut tx, "tax_rates", tax_rate_id, "Tax rate").await?;
     }
-    let product = sqlx::query_as::<_, Product>(
+    if let Some(Some(category_id)) = body.category_id {
+        let tenant_id = tx.tenant_id;
+        super::categories::assert_assignable(&mut tx, tenant_id, category_id).await?;
+    }
+    let product = sqlx::query_as::<_, Product>(&format!(
         "UPDATE atlas.products
          SET name = COALESCE($2, name),
              is_active = COALESCE($3, is_active),
@@ -89,10 +97,11 @@ pub async fn update_product(
              tax_rate_id = CASE WHEN $5 THEN $6 ELSE tax_rate_id END,
              sku = CASE WHEN $7 THEN $8 ELSE sku END,
              attributes = COALESCE($9, attributes),
+             category_id = CASE WHEN $11 THEN $12 ELSE category_id END,
              updated_at = now()
          WHERE id = $1 AND tenant_id = $10 AND deleted_at IS NULL
-         RETURNING id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active, tax_rate_id, is_returnable",
-    )
+         RETURNING {PRODUCT_COLUMNS}"
+    ))
     .bind(product_id)
     .bind(&name)
     .bind(body.is_active)
@@ -103,6 +112,8 @@ pub async fn update_product(
     .bind(&sku)
     .bind(&body.attributes)
     .bind(tx.tenant_id)
+    .bind(body.category_id.is_some())
+    .bind(body.category_id.flatten())
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("Product not found."))?;
@@ -144,6 +155,13 @@ pub async fn upsert_listing(
     require_visible(&mut tx, "products", product_id, "Product").await?;
     require_visible(&mut tx, "stores", store_id, "Store").await?;
     let tenant_id = tx.tenant_id;
+    let previous_cost: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT cost_amount_minor FROM atlas.product_store_listings WHERE product_id = $1 AND store_id = $2",
+    )
+    .bind(product_id)
+    .bind(store_id)
+    .fetch_optional(&mut *tx)
+    .await?;
     let listing = sqlx::query_as::<_, Listing>(
         "INSERT INTO atlas.product_store_listings (id, tenant_id, product_id, store_id, cost_amount_minor, low_stock_threshold, is_active)
          VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), COALESCE($7, true))
@@ -163,6 +181,10 @@ pub async fn upsert_listing(
     .fetch_one(&mut *tx)
     .await?;
     let user_id = tx.user_id;
+    let previous_cost = previous_cost.flatten();
+    if body.cost_amount_minor.is_some() && previous_cost != listing.cost_amount_minor {
+        super::price_history::record_cost_change(&mut tx, tenant_id, user_id, product_id, store_id, previous_cost, listing.cost_amount_minor).await?;
+    }
     audit::record(&mut tx, tenant_id, user_id, "product_listing", listing.id, "product.list", serde_json::to_value(&listing).ok()).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Product listed.", listing)));
@@ -298,6 +320,7 @@ pub async fn create_price_rule(
     .fetch_one(&mut *tx)
     .await?;
     let user_id = tx.user_id;
+    super::price_history::record_rule_created(&mut tx, tenant_id, user_id, &rule).await?;
     audit::record(&mut tx, tenant_id, user_id, "price_rule", rule.id, "price_rule.create", serde_json::to_value(&rule).ok()).await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Price rule created.", rule)));

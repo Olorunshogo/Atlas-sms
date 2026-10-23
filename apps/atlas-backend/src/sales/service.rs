@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -171,15 +172,17 @@ pub async fn void_sale(
     }
 
     if sale.status == "completed" {
-        let lines = list_sale_lines(conn, sale_id).await?;
-        let posting_lines: Vec<PostingLine> = lines
-            .iter()
-            .map(|line| PostingLine {
-                product_id: line.product_id,
-                stock_item_id: line.stock_item_id,
-                unit_id: Some(line.unit_id),
-                quantity: line.quantity,
-            })
+        // Reverses what the sale actually posted, so batches split first-expiry-first-out go back to the same batches
+        let sold: Vec<(Uuid, Option<Uuid>, Decimal)> = sqlx::query_as(
+            "SELECT product_id, stock_item_id, quantity FROM atlas.stock_movements
+             WHERE reference_id = $1 AND movement_type = 'sale' ORDER BY id",
+        )
+        .bind(sale_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        let posting_lines: Vec<PostingLine> = sold
+            .into_iter()
+            .map(|(product_id, stock_item_id, quantity)| PostingLine { product_id, stock_item_id, unit_id: None, quantity: -quantity })
             .collect();
         inventory::service::post(
             conn,

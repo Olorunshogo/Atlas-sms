@@ -181,5 +181,12 @@ pub async fn post(conn: &mut PgConnection, posting: Posting<'_>) -> Result<Vec<S
         movements.push(movement);
     }
 
+    let mut net: BTreeMap<Uuid, Decimal> = BTreeMap::new();
+    for movement in &movements {
+        *net.entry(movement.product_id).or_default() += movement.quantity;
+    }
+    let changes: Vec<(Uuid, Decimal)> = net.into_iter().collect();
+    crate::notifications::service::check_low_stock(conn, posting.tenant_id, posting.store_id, &changes).await;
+
     return Ok(movements);
 }

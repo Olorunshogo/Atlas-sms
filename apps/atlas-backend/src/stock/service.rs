@@ -52,15 +52,22 @@ async fn on_hand_for_product(
     .map_err(ApiError::from)
 }
 
-/**
- * A count correction or write-off. Never blocked by the negative-stock check - a physical count is the authority the ledger is being corrected to, not a request that might overdraw it.
- */
+/// A direct correction. Can't take on-hand below zero unless the store's `allow_negative_stock` policy permits it (FR-12); a physical count corrects through `counts` instead.
 pub async fn adjust_stock(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     user_id: Uuid,
     payload: &AdjustStockRequest,
 ) -> Result<StockMovement, ApiError> {
+    inventory::batches::check_batch_given(conn, payload.product_id, payload.stock_item_id).await?;
+    let allow_negative: Option<bool> = sqlx::query_scalar("SELECT allow_negative_stock FROM atlas.stores WHERE id = $1 AND deleted_at IS NULL")
+        .bind(payload.store_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let policy = match allow_negative {
+        Some(true) => NegativeStockPolicy::Allow,
+        _ => NegativeStockPolicy::Reject,
+    };
     let lines = [PostingLine {
         product_id: payload.product_id,
         stock_item_id: payload.stock_item_id,
@@ -76,7 +83,7 @@ pub async fn adjust_stock(
             reason: &payload.reason,
             reference_id: None,
             actor_user_id: user_id,
-            policy: NegativeStockPolicy::Allow,
+            policy,
             source: "adjustment",
             lines: &lines,
         },
@@ -366,6 +373,8 @@ pub async fn inventory_by_product(
     scope: Option<Vec<Uuid>>,
     store_id: Option<Uuid>,
     product_id: Option<Uuid>,
+    category_id: Option<Uuid>,
+    search: Option<&str>,
     low_stock: bool,
 ) -> Result<Vec<ProductInventory>, ApiError> {
     let rows = sqlx::query_as::<_, LocationRow>(
@@ -378,6 +387,8 @@ pub async fn inventory_by_product(
            AND ($2::uuid[] IS NULL OR m.store_id = ANY($2))
            AND ($3::uuid IS NULL OR m.store_id = $3)
            AND ($4::uuid IS NULL OR m.product_id = $4)
+           AND ($6::uuid IS NULL OR p.category_id = $6)
+           AND ($7::text IS NULL OR p.name ILIKE '%' || $7 || '%' OR p.sku ILIKE '%' || $7 || '%')
          GROUP BY m.product_id, p.name, m.store_id, s.name, s.created_at, l.low_stock_threshold
          HAVING (NOT $5 OR SUM(m.quantity) <= COALESCE(l.low_stock_threshold, 0))
          ORDER BY p.name, m.product_id, s.created_at, m.store_id",
@@ -387,6 +398,8 @@ pub async fn inventory_by_product(
     .bind(store_id)
     .bind(product_id)
     .bind(low_stock)
+    .bind(category_id)
+    .bind(search)
     .fetch_all(conn)
     .await?;
 
@@ -426,7 +439,7 @@ pub async fn product_inventory(
         .fetch_optional(&mut *conn)
         .await?;
     let name = name.ok_or_else(|| ApiError::not_found("Product not found."))?;
-    let found = inventory_by_product(conn, tenant_id, scope, None, Some(product_id), false).await?;
+    let found = inventory_by_product(conn, tenant_id, scope, None, Some(product_id), None, None, false).await?;
     return Ok(found.into_iter().next().unwrap_or_else(|| ProductInventory {
         product_id,
         product_name: name,

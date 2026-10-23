@@ -4,7 +4,8 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::validate::{require_visible_for, required_text};
 
-use super::models::{CreateProductRequest, CreateProductTypeRequest, Product, ProductType};
+use super::categories::assert_assignable;
+use super::models::{CreateProductRequest, CreateProductTypeRequest, ListProductsQuery, Product, ProductStatusFilter, ProductType, PRODUCT_COLUMNS};
 
 // === Product types
 
@@ -59,14 +60,29 @@ pub async fn create_product_type(
 pub async fn list_products(
     conn: &mut PgConnection,
     tenant_id: Uuid,
+    query: &ListProductsQuery,
 ) -> Result<Vec<Product>, ApiError> {
-    return sqlx::query_as::<_, Product>(
-        "SELECT id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active, tax_rate_id, is_returnable
-         FROM atlas.products
+    let search = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
+    return sqlx::query_as::<_, Product>(&format!(
+        "SELECT {PRODUCT_COLUMNS}
+         FROM atlas.products p
          WHERE tenant_id = $1 AND deleted_at IS NULL
-         ORDER BY name",
-    )
+           AND ($2::text IS NULL
+                OR name ILIKE '%' || $2 || '%'
+                OR sku ILIKE '%' || $2 || '%'
+                OR EXISTS (SELECT 1 FROM atlas.product_barcodes b WHERE b.product_id = p.id AND b.barcode = $2))
+           AND ($3::uuid IS NULL OR category_id = $3)
+           AND ($4::uuid IS NULL OR product_type_id = $4)
+           AND ($5::uuid IS NULL OR parent_product_id = $5)
+           AND ($6::boolean IS NULL OR is_active = $6)
+         ORDER BY name"
+    ))
     .bind(tenant_id)
+    .bind(search)
+    .bind(query.category_id)
+    .bind(query.product_type_id)
+    .bind(query.parent_product_id)
+    .bind(query.status.map(|status| status == ProductStatusFilter::Active))
     .fetch_all(conn)
     .await
     .map_err(ApiError::from);
@@ -87,11 +103,17 @@ pub async fn create_product(
     }
     require_visible_for(conn, tenant_id, "product_types", payload.product_type_id, "Product type").await?;
     require_visible_for(conn, tenant_id, "units_of_measure", payload.base_unit_id, "Unit").await?;
-    return sqlx::query_as::<_, Product>(
-        "INSERT INTO atlas.products (id, tenant_id, product_type_id, base_unit_id, name, sku, attributes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, is_active, tax_rate_id, is_returnable",
-    )
+    if let Some(category_id) = payload.category_id {
+        assert_assignable(conn, tenant_id, category_id).await?;
+    }
+    if let Some(parent_id) = payload.parent_product_id {
+        assert_variant_parent(conn, tenant_id, parent_id).await?;
+    }
+    return sqlx::query_as::<_, Product>(&format!(
+        "INSERT INTO atlas.products (id, tenant_id, product_type_id, base_unit_id, name, sku, attributes, category_id, parent_product_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING {PRODUCT_COLUMNS}"
+    ))
     .bind(Uuid::now_v7())
     .bind(tenant_id)
     .bind(payload.product_type_id)
@@ -99,7 +121,25 @@ pub async fn create_product(
     .bind(&name)
     .bind(&sku)
     .bind(&payload.attributes)
+    .bind(payload.category_id)
+    .bind(payload.parent_product_id)
     .fetch_one(conn)
     .await
     .map_err(ApiError::from);
+}
+
+/// Variants are one level deep: the parent must exist and not itself be a variant.
+pub async fn assert_variant_parent(conn: &mut PgConnection, tenant_id: Uuid, parent_id: Uuid) -> Result<(), ApiError> {
+    let grandparent: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT parent_product_id FROM atlas.products WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(parent_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?;
+    return match grandparent {
+        None => Err(ApiError::not_found("Parent product not found.")),
+        Some(Some(_)) => Err(ApiError::bad_request_with_code("A variant cannot have variants of its own.", "VALIDATION_FAILED")),
+        Some(None) => Ok(()),
+    };
 }
