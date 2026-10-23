@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementType {
     PurchaseReceipt,
+    PurchaseReturn,
     Sale,
     SaleReturn,
     SaleVoid,
@@ -18,6 +19,7 @@ impl MovementType {
     pub fn as_db_str(self) -> &'static str {
         return match self {
             MovementType::PurchaseReceipt => "purchase_receipt",
+            MovementType::PurchaseReturn => "purchase_return",
             MovementType::Sale => "sale",
             MovementType::SaleReturn => "sale_return",
             MovementType::SaleVoid => "sale_void",
@@ -33,7 +35,7 @@ impl MovementType {
      */
     pub fn signed(self, quantity: Decimal) -> Decimal {
         return match self {
-            MovementType::Sale | MovementType::TransferOut => -quantity,
+            MovementType::Sale | MovementType::TransferOut | MovementType::PurchaseReturn => -quantity,
             MovementType::Adjustment => quantity,
             MovementType::PurchaseReceipt
             | MovementType::SaleReturn

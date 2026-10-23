@@ -32,17 +32,14 @@ export * from './empty-state';
 // === Files
 export * from './selected-file-info';
 
-// === Dialog
-export * from './dialog';
-
 // === Toast
 export * from './toast';
 
 // === Loader
 export * from './loader';
 
-// === Motion tokens
-export * from './motion';
-
 // === Sections
 export * from './section-faq';
+
+// === Responsive/utility composables (@vueuse/core)
+export * from './responsive';

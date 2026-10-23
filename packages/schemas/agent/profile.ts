@@ -1,17 +1,6 @@
-import { z } from 'zod';
-import { createNameSchema, createPhoneSchema } from '../generics';
-
 /*
- * Mirrors updateAgentProfileSchema on the reference backend (update-agent-profile.dto.ts).
- * Phone may be cleared to an empty string; anything non-empty must pass the shared Nigerian rule.
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
  */
-export const agentProfileSchema = z.object({
-  firstName: createNameSchema('First name'),
-  lastName: createNameSchema('Last name'),
-  phone: z.union([createPhoneSchema(), z.literal('')]),
-  address: z.string().max(500),
-  state: z.string().max(100),
-  lga: z.string().max(100),
-});
-
-export type AgentProfileValues = z.infer<typeof agentProfileSchema>;

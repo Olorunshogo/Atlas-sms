@@ -15,6 +15,7 @@ mod crypto;
 mod customers;
 mod email;
 mod error;
+mod expenses;
 mod extractors;
 mod inventory;
 mod normalize;
@@ -89,6 +90,9 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/payment-methods", API_PREFIX), payments::methods_router())
         .nest(&format!("{}/suppliers", API_PREFIX), purchasing::suppliers_router())
         .nest(&format!("{}/purchase-orders", API_PREFIX), purchasing::purchase_orders_router())
+        .nest(&format!("{}/purchase-returns", API_PREFIX), purchasing::purchase_returns_router())
+        .nest(&format!("{}/expense-categories", API_PREFIX), expenses::categories_router())
+        .nest(&format!("{}/expenses", API_PREFIX), expenses::router())
         .nest(&format!("{}/roles", API_PREFIX), roles::router())
         .nest(&format!("{}/product-types", API_PREFIX), products::product_types_router())
         .nest(&format!("{}/products", API_PREFIX), products::router())

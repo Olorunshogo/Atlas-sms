@@ -1,11 +1,6 @@
-import { z } from 'zod';
-import { createEmailSchema } from '../generics';
-
-export const ADMIN_INVITE_DESKS = ['buyer', 'agent', 'hr', 'tech'] as const;
-
-export const createAdminInviteSchema = z.object({
-  email: createEmailSchema(),
-  desk: z.enum(ADMIN_INVITE_DESKS),
-});
-
-export type CreateAdminInviteValues = z.infer<typeof createAdminInviteSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

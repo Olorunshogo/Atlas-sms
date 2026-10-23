@@ -21,7 +21,7 @@ pub struct AdjustStockRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TransferStockRequest {
+pub struct RequestTransferRequest {
     pub from_store_id: Uuid,
     pub to_store_id: Uuid,
     pub product_id: Uuid,
@@ -29,6 +29,44 @@ pub struct TransferStockRequest {
     /// Always positive - the direction is `from_store_id` -> `to_store_id`.
     pub quantity: Decimal,
     pub reason: String,
+}
+
+#[derive(Debug, sqlx::Type, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[sqlx(type_name = "stock_transfer_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum StockTransferStatus {
+    Requested,
+    Approved,
+    Rejected,
+    Dispatched,
+    Received,
+    Cancelled,
+}
+
+/**
+ * One stage of FR-22's workflow. Stock leaves `from_store_id` only at
+ * `dispatch` and arrives at `to_store_id` only at `receive` - the gap
+ * between the two is the documented in-transit state, so it is never
+ * counted as available at both stores at once.
+ */
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct StockTransfer {
+    pub id: Uuid,
+    pub from_store_id: Uuid,
+    pub to_store_id: Uuid,
+    pub product_id: Uuid,
+    pub stock_item_id: Option<Uuid>,
+    pub quantity: Decimal,
+    pub reason: String,
+    pub status: StockTransferStatus,
+    pub requested_by_user_id: Uuid,
+    pub requested_at: DateTime<Utc>,
+    pub approved_by_user_id: Option<Uuid>,
+    pub approved_at: Option<DateTime<Utc>>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    pub received_at: Option<DateTime<Utc>>,
+    pub cancelled_by_user_id: Option<Uuid>,
+    pub cancelled_at: Option<DateTime<Utc>>,
 }
 
 pub use crate::inventory::StockMovement;

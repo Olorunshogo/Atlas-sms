@@ -1,15 +1,6 @@
-import { z } from 'zod';
-import { createEmailSchema, createOtpSchema } from '../generics';
-
-export const verifyEmailSchema = z.object({
-  email: createEmailSchema(),
-  otp: createOtpSchema(),
-});
-
-export type VerifyEmailValues = z.infer<typeof verifyEmailSchema>;
-
-export const resendOtpSchema = z.object({
-  email: createEmailSchema(),
-});
-
-export type ResendOtpValues = z.infer<typeof resendOtpSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

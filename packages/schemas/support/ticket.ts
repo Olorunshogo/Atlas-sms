@@ -1,15 +1,6 @@
-import { z } from 'zod';
-import {
-  createEmailSchema,
-  createNameSchema,
-  createRequiredString,
-} from '../generics';
-
-/* Mirrors createContactSchema on the reference backend (create-contact.dto.ts), so a valid form is never rejected server-side. */
-export const supportTicketSchema = z.object({
-  fullName: createNameSchema(),
-  email: createEmailSchema(),
-  message: createRequiredString('Message', { min: 15, max: 1000 }),
-});
-
-export type SupportTicketValues = z.infer<typeof supportTicketSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

@@ -5,7 +5,14 @@ use uuid::Uuid;
 use crate::error::{codes, ApiError};
 use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 
-use super::models::{AdjustStockRequest, LocationQuantity, MovementRecord, ProductInventory, StockLevel, StockMovement, TransferStockRequest};
+use super::models::{
+    AdjustStockRequest, LocationQuantity, MovementRecord, ProductInventory, RequestTransferRequest,
+    StockLevel, StockMovement, StockTransfer,
+};
+
+const TRANSFER_COLUMNS: &str = "id, from_store_id, to_store_id, product_id, stock_item_id, quantity, reason, status,
+     requested_by_user_id, requested_at, approved_by_user_id, approved_at,
+     dispatched_at, received_at, cancelled_by_user_id, cancelled_at";
 
 /**
  * On-hand is never a stored column - it's `sum(quantity)` over the ledger for a store, grouped by product.
@@ -26,6 +33,23 @@ pub async fn on_hand_for_store(
     .fetch_all(conn)
     .await
     .map_err(ApiError::from);
+}
+
+/// Same ledger-sum approach as `on_hand_for_store`, scoped to one product - what a transfer request needs to check.
+async fn on_hand_for_product(
+    conn: &mut PgConnection,
+    store_id: Uuid,
+    product_id: Uuid,
+) -> Result<Decimal, ApiError> {
+    sqlx::query_scalar::<_, Option<Decimal>>(
+        "SELECT SUM(quantity) FROM atlas.stock_movements WHERE store_id = $1 AND product_id = $2",
+    )
+    .bind(store_id)
+    .bind(product_id)
+    .fetch_one(conn)
+    .await
+    .map(|sum| sum.unwrap_or(Decimal::ZERO))
+    .map_err(ApiError::from)
 }
 
 /**
@@ -61,16 +85,14 @@ pub async fn adjust_stock(
     return Ok(movements.remove(0));
 }
 
-/**
- * Two movements in one transaction: `transfer_out` at the source store (negative), `transfer_in` at the destination (positive).
- * Both carry the same `reference_id` so they're traceable as one transfer, not two unrelated adjustments.
- */
-pub async fn transfer_stock(
+// === Inter-store transfers (FR-22): requested -> approved -> dispatched -> received, reject/cancel as exits.
+
+pub async fn request_transfer(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     user_id: Uuid,
-    payload: &TransferStockRequest,
-) -> Result<(StockMovement, StockMovement), ApiError> {
+    payload: &RequestTransferRequest,
+) -> Result<StockTransfer, ApiError> {
     if payload.quantity <= Decimal::ZERO {
         return Err(ApiError::bad_request("quantity must be positive"));
     }
@@ -82,23 +104,161 @@ pub async fn transfer_stock(
 
     ensure_tradable(conn, tenant_id, &[payload.from_store_id, payload.to_store_id], payload.product_id).await?;
 
-    let reference_id = Uuid::now_v7();
-    let lines = [PostingLine {
-        product_id: payload.product_id,
-        stock_item_id: payload.stock_item_id,
-        unit_id: None,
-        quantity: payload.quantity,
-    }];
+    // Not a hold - just an early, honest rejection. The authoritative check
+    // that actually prevents overselling happens at dispatch.
+    let available = on_hand_for_product(conn, payload.from_store_id, payload.product_id).await?;
+    if available < payload.quantity {
+        return Err(ApiError::conflict_with_code(
+            "Source store does not have enough stock for this transfer.",
+            codes::PRODUCT_OUT_OF_STOCK,
+        ));
+    }
 
-    // The sending store can't give away stock it doesn't have.
-    let mut out_movements = inventory::service::post(
+    return sqlx::query_as::<_, StockTransfer>(&format!(
+        "INSERT INTO atlas.stock_transfers
+            (id, tenant_id, from_store_id, to_store_id, product_id, stock_item_id, quantity, reason, requested_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING {TRANSFER_COLUMNS}"
+    ))
+    .bind(Uuid::now_v7())
+    .bind(tenant_id)
+    .bind(payload.from_store_id)
+    .bind(payload.to_store_id)
+    .bind(payload.product_id)
+    .bind(payload.stock_item_id)
+    .bind(payload.quantity)
+    .bind(&payload.reason)
+    .bind(user_id)
+    .fetch_one(conn)
+    .await
+    .map_err(ApiError::from);
+}
+
+pub async fn get_transfer(conn: &mut PgConnection, transfer_id: Uuid) -> Result<StockTransfer, ApiError> {
+    return sqlx::query_as::<_, StockTransfer>(&format!(
+        "SELECT {TRANSFER_COLUMNS} FROM atlas.stock_transfers WHERE id = $1"
+    ))
+    .bind(transfer_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Transfer not found."));
+}
+
+pub async fn list_transfers(conn: &mut PgConnection, store_id: Uuid) -> Result<Vec<StockTransfer>, ApiError> {
+    return sqlx::query_as::<_, StockTransfer>(&format!(
+        "SELECT {TRANSFER_COLUMNS} FROM atlas.stock_transfers
+         WHERE from_store_id = $1 OR to_store_id = $1
+         ORDER BY requested_at DESC"
+    ))
+    .bind(store_id)
+    .fetch_all(conn)
+    .await
+    .map_err(ApiError::from);
+}
+
+pub async fn approve_transfer(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    transfer_id: Uuid,
+) -> Result<StockTransfer, ApiError> {
+    return sqlx::query_as::<_, StockTransfer>(&format!(
+        "UPDATE atlas.stock_transfers
+         SET status = 'approved', approved_by_user_id = $1, approved_at = now()
+         WHERE id = $2 AND tenant_id = $3 AND status = 'requested'
+         RETURNING {TRANSFER_COLUMNS}"
+    ))
+    .bind(user_id)
+    .bind(transfer_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a requested transfer can be approved.",
+        codes::TRANSFER_NOT_REQUESTED,
+    ));
+}
+
+pub async fn reject_transfer(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    transfer_id: Uuid,
+) -> Result<StockTransfer, ApiError> {
+    return sqlx::query_as::<_, StockTransfer>(&format!(
+        "UPDATE atlas.stock_transfers
+         SET status = 'rejected'
+         WHERE id = $1 AND tenant_id = $2 AND status = 'requested'
+         RETURNING {TRANSFER_COLUMNS}"
+    ))
+    .bind(transfer_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a requested transfer can be rejected.",
+        codes::TRANSFER_NOT_REQUESTED,
+    ));
+}
+
+pub async fn cancel_transfer(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    transfer_id: Uuid,
+) -> Result<StockTransfer, ApiError> {
+    return sqlx::query_as::<_, StockTransfer>(&format!(
+        "UPDATE atlas.stock_transfers
+         SET status = 'cancelled', cancelled_by_user_id = $1, cancelled_at = now()
+         WHERE id = $2 AND tenant_id = $3 AND status IN ('requested', 'approved')
+         RETURNING {TRANSFER_COLUMNS}"
+    ))
+    .bind(user_id)
+    .bind(transfer_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a requested or approved transfer can be cancelled (dispatched stock has already left).",
+        codes::TRANSFER_NOT_CANCELLABLE,
+    ));
+}
+
+// Claims the status transition first, so two concurrent dispatches can't both post the movement.
+pub async fn dispatch_transfer(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    transfer_id: Uuid,
+) -> Result<StockTransfer, ApiError> {
+    let claimed = sqlx::query_as::<_, StockTransfer>(&format!(
+        "UPDATE atlas.stock_transfers
+         SET status = 'dispatched', dispatched_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND status = 'approved'
+         RETURNING {TRANSFER_COLUMNS}"
+    ))
+    .bind(transfer_id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only an approved transfer can be dispatched.",
+        codes::TRANSFER_NOT_APPROVED,
+    ))?;
+
+    let lines = [PostingLine {
+        product_id: claimed.product_id,
+        stock_item_id: claimed.stock_item_id,
+        unit_id: None,
+        quantity: claimed.quantity,
+    }];
+    inventory::service::post(
         conn,
         Posting {
             tenant_id,
-            store_id: payload.from_store_id,
+            store_id: claimed.from_store_id,
             movement_type: MovementType::TransferOut,
-            reason: &payload.reason,
-            reference_id: Some(reference_id),
+            reason: &claimed.reason,
+            reference_id: Some(claimed.id),
             actor_user_id: user_id,
             policy: NegativeStockPolicy::Reject,
             source: "transfer",
@@ -107,14 +267,45 @@ pub async fn transfer_stock(
     )
     .await?;
 
-    let mut in_movements = inventory::service::post(
+    return Ok(claimed);
+}
+
+/// Mirrors `dispatch_transfer`: claim the transition first, then post the movement.
+pub async fn receive_transfer(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    transfer_id: Uuid,
+) -> Result<StockTransfer, ApiError> {
+    let claimed = sqlx::query_as::<_, StockTransfer>(&format!(
+        "UPDATE atlas.stock_transfers
+         SET status = 'received', received_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND status = 'dispatched'
+         RETURNING {TRANSFER_COLUMNS}"
+    ))
+    .bind(transfer_id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a dispatched transfer can be received.",
+        codes::TRANSFER_NOT_DISPATCHED,
+    ))?;
+
+    let lines = [PostingLine {
+        product_id: claimed.product_id,
+        stock_item_id: claimed.stock_item_id,
+        unit_id: None,
+        quantity: claimed.quantity,
+    }];
+    inventory::service::post(
         conn,
         Posting {
             tenant_id,
-            store_id: payload.to_store_id,
+            store_id: claimed.to_store_id,
             movement_type: MovementType::TransferIn,
-            reason: &payload.reason,
-            reference_id: Some(reference_id),
+            reason: &claimed.reason,
+            reference_id: Some(claimed.id),
             actor_user_id: user_id,
             policy: NegativeStockPolicy::Allow,
             source: "transfer",
@@ -123,7 +314,7 @@ pub async fn transfer_stock(
     )
     .await?;
 
-    return Ok((out_movements.remove(0), in_movements.remove(0)));
+    return Ok(claimed);
 }
 
 /**

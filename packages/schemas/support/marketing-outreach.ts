@@ -1,21 +1,6 @@
-import { z } from 'zod';
-import { createNameSchema, createPhoneSchema } from '../generics';
-
 /*
- * Mirrors webLeadSchema on the reference backend (public.controller.ts).
- * quantity stays a string in the form (NumberInputField) and is coerced to a number at submit.
- * Optional blanks are trimmed to undefined so the payload matches the DTO's optional fields.
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
  */
-export const marketingOutreachSchema = z.object({
-  ownerName: createNameSchema(),
-  phone: createPhoneSchema(),
-  shopName: z.string(),
-  lga: z.string(),
-  area: z.string(),
-  productInterest: z.string(),
-  quantity: z.string(),
-  howHeard: z.string(),
-  notes: z.string(),
-});
-
-export type MarketingOutreachValues = z.infer<typeof marketingOutreachSchema>;

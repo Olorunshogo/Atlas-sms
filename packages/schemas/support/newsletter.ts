@@ -1,11 +1,6 @@
-import { z } from 'zod';
-import { createEmailSchema } from '../generics';
-
-/* Mirrors subscribeNewsletterSchema on the reference backend (subscribe-newsletter.dto.ts). */
-export const newsletterSubscribeSchema = z.object({
-  email: createEmailSchema(),
-});
-
-export type NewsletterSubscribeValues = z.infer<
-  typeof newsletterSubscribeSchema
->;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

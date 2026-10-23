@@ -104,4 +104,66 @@ CI gets wired when that work happens, not before.
 - No payment gateway: a `pending` card or transfer payment is confirmed
   by a person (`POST /api/v1/payments/{id}/status`), not a webhook.
   Store credit can be refunded to but not yet spent at checkout.
+- Purchase orders (FR-21) can be created and received but not edited
+  before approval, submitted, formally approved, or cancelled - only
+  `create` and `receive` exist. Purchase returns to a supplier (FR-23)
+  have no endpoint at all yet. Inter-store transfers (FR-22) are done:
+  staged `request -> approve/reject -> dispatch -> receive/cancel` under
+  `/api/v1/stock/transfers`, stock leaving the source only at dispatch and
+  arriving at the destination only at receive.
 - No CI workflow. See item 8.
+
+## The online storefront (approved, not yet built)
+
+FR-10 to FR-14 from `docs/SystemsRequirementDoc.md` (cart, wishlist,
+checkout, payment gateway, promotions, invoices) was initially out of
+scope per the dated SRS v1.0 (`docs/PDF/Store-Management-System-SRS-v1.0.pdf`,
+which explicitly lists "online shopping storefront" as excluded from the
+initial release). The owner has since separately approved it. Decided:
+a new app, `apps/atlas-storefront`, not a route tree inside `atlas-web`
+
+- customer auth is a different surface from staff auth. Payment gateway
+  starts as the same adapter-trait-plus-mock pattern `EmailProvider` and
+  the newly-built `PaymentProvider` already use (a real Paystack/Flutterwave
+  adapter is separate, later work). Rebuilt clean against current `develop`,
+  not copied from the stale `origin/at` branch it originated on - migrations
+  renumbered past whatever the tree is at when that work starts, `lib.rs`/
+  `state.rs` updated to add rather than replace, and real tests written
+  (the original had none).
+
+## The Debridgers reference-source port
+
+`packages/{hooks,schemas,types,utils,data,api-client}` and
+`libs/shared/composables/src/{payment,ratings}` are ported from
+`~/Projects/React/Debridgers` (a separate, unrelated React/Remix monorepo -
+a delivery/logistics marketplace with buyer/agent/admin/employee/careers
+apps). None of it is Atlas's domain. Current state:
+
+- Most of it had its content cleared to a placeholder comment but the
+  files and directory shape were kept deliberately, as a structural
+  head-start for Atlas's own hooks/schemas/types/utils/data/api-client
+  when that work actually happens.
+- `nigerian-states.ts` and `phone-dial-codes.ts` under `packages/data` were
+  left intact - genuinely reusable reference data, not domain logic.
+- `ratings` (both `packages/{hooks,schemas}/ratings` and
+  `libs/shared/composables/src/ratings`) was left intact, untouched. It is
+  not wired into Atlas yet but is expected to be built out and modified
+  for real use later, unlike the rest of the port.
+- `libs/shared/composables/src/payment` was not addressed in this pass -
+  still an open prune-or-keep call, separate from ratings.
+- The generic utility hooks that used to live in `packages/hooks`
+  (debounce, media query, reduced motion) are superseded by `@vueuse/core`,
+  wired in through `@atlas/ui-core` (`packages/atlas-ui/core/src/lib/responsive`)
+  since that's the one package both `atlas-web` and `atlas-pos` depend on.
+- The duplicate dialog engine that lived in `@atlas/ui-core`
+  (`packages/atlas-ui/core/src/lib/dialog`, plus its tokens-only
+  `lib/motion`) has been deleted. It was a second, unused Vue conversion of
+  the same Debridgers dialog engine already live in `@atlas/ui`
+  (`libs/shared/ui/src/dialog/DialogProvider.vue`, wired up in
+  `apps/atlas-web/app/layouts/default.vue`) - nothing imported the
+  `ui-core` copy.
+- The table port is still incomplete. `libs/shared/ui/src/table/DataTable.vue`
+  covers search/sort/pagination; it is missing a toolbar, loading
+  skeleton, row-actions menu, mobile card view, and density toggle that
+  exist in the raw source at `packages/lib/table/*.tsx`. That raw copy
+  stays until those are ported, then gets cleared like the rest.

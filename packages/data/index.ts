@@ -1,23 +1,13 @@
 // === Nigerian administrative geography
 export * from './nigerian-states';
 
-// === Outreach feature's location identifiers (not geography - see above)
-export * from './outreach-locations';
-
-// === Product categories
-export * from './product-categories';
-
-// === Support contact details
-export * from './support';
-
-// === Legal documents
-export * from './legal';
-
 // === Phone dial codes
 export * from './phone-dial-codes';
 
-// === Stock request status presentation
-export * from './stock-request-status-badge';
-
-// === Careers job tech-stack badges
-export * from './careers-tech-stack';
+/*
+ * Everything else ported from the Debridgers reference source
+ * (outreach-locations, product-categories, support, legal, stock-request
+ * status badge, careers tech-stack) had its content cleared - not this
+ * domain, not wired into Atlas. The files stay as placeholders for Atlas's
+ * own data. See docs/atlas/CONTEXT.md.
+ */

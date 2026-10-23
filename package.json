@@ -32,7 +32,7 @@
     "node": ">=24",
     "pnpm": ">=10"
   },
-  "packageManager": "pnpm@11.13.0",
+  "packageManager": "pnpm@11.28.5",
   "workspaces": [
     "packages/*",
     "apps/*",

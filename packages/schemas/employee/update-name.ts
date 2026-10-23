@@ -1,9 +1,6 @@
-import { z } from 'zod';
-import { createNameSchema } from '../generics';
-
-export const updateEmployeeNameSchema = z.object({
-  firstName: createNameSchema('First name'),
-  lastName: createNameSchema('Last name'),
-});
-
-export type UpdateEmployeeNameValues = z.infer<typeof updateEmployeeNameSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

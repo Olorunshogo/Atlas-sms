@@ -1,10 +1,6 @@
-import { useMediaQuery } from './use-media-query';
-
-/**
- * True when the viewer has asked the OS to reduce motion.
- *
- * Server has no matchMedia, so it always reports false and the client swaps on hydration - animations opt out on the client only, never mismatch on render.
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
  */
-export function usePrefersReducedMotion(): boolean {
-  return useMediaQuery('(prefers-reduced-motion: reduce)', false);
-}

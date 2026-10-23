@@ -164,7 +164,7 @@ async fn store_scoped_staff_only_see_their_own_store(pool: PgPool) {
 async fn the_movement_trail_records_who_what_and_why_newest_first(pool: PgPool) {
     let router = build_router(pool.clone());
     let (owner, tenant_id, [lagos, abuja, _kaduna], rice) = three_branches(&router, &pool, "trail-owner@example.com").await;
-    let (status, _) = post(
+    let (status, body) = post(
         &router,
         "/api/v1/stock/transfers",
         &as_user(&owner),
@@ -172,6 +172,12 @@ async fn the_movement_trail_records_who_what_and_why_newest_first(pool: PgPool) 
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    let transfer_id = body["data"]["id"].as_str().unwrap();
+    // Staged (FR-22): a request alone posts no movement - approve, then
+    // dispatch and receive are what actually move stock.
+    post(&router, &format!("/api/v1/stock/transfers/{transfer_id}/approve"), &as_user(&owner), json!({})).await;
+    post(&router, &format!("/api/v1/stock/transfers/{transfer_id}/dispatch"), &as_user(&owner), json!({})).await;
+    post(&router, &format!("/api/v1/stock/transfers/{transfer_id}/receive"), &as_user(&owner), json!({})).await;
     let owner_id: Uuid = sqlx::query_scalar("SELECT created_by_user_id FROM atlas.stock_movements ORDER BY created_at LIMIT 1").fetch_one(&pool).await.unwrap();
 
     let (_, trail) = get(&router, "/api/v1/stock/movements", &as_user(&owner)).await;

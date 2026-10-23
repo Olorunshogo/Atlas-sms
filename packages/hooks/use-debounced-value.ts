@@ -1,22 +1,6 @@
-import { useEffect, useState } from 'react';
-
-/**
- * Trails `value` by `delayMs`, so a keystroke does not become a request.
- *
- * The first value is returned immediately rather than after a delay - a table should render its initial state, not an empty one, while a timer runs.
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
  */
-export function useDebouncedValue<T>(value: T, delayMs = 300): T {
-  const [debounced, setDebounced] = useState<T>(value);
-
-  useEffect(() => {
-    if (delayMs <= 0) {
-      setDebounced(value);
-      return;
-    }
-
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-
-  return debounced;
-}

@@ -1,11 +1,6 @@
-import { z } from 'zod';
-
-export const bankDetailsSchema = z.object({
-  bankCode: z.string().min(1, 'Select your bank'),
-  accountNumber: z
-    .string()
-    .length(10, 'Account number must be 10 digits')
-    .regex(/^\d+$/, 'Account number must be 10 digits'),
-});
-
-export type BankDetailsValues = z.infer<typeof bankDetailsSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

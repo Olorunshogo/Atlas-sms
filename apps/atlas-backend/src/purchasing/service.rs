@@ -3,12 +3,13 @@ use rust_decimal::Decimal;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::error::ApiError;
+use crate::error::{codes, ApiError};
 use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 
 use super::models::{
-    CreatePurchaseOrderRequest, GoodsReceivedNoteData, PurchaseOrder, PurchaseOrderLine, ReceiveGoodsRequest,
-    Supplier, UpdateSupplierRequest,
+    CreatePurchaseOrderRequest, EditPurchaseOrderRequest, GoodsReceivedNoteData, PurchaseOrder, PurchaseOrderLine,
+    PurchaseReturn, PurchaseReturnLine, ReceiveGoodsRequest, RecordPurchaseReturnRequest, Supplier,
+    UpdateSupplierRequest,
 };
 
 // === Suppliers
@@ -148,6 +149,247 @@ pub async fn purchase_order_store_id(conn: &mut PgConnection, purchase_order_id:
         .fetch_optional(conn)
         .await?
         .ok_or_else(|| ApiError::bad_request("Unknown purchase order."));
+}
+
+// `draft` only. `lines`, when given, replaces the order's lines wholesale.
+pub async fn edit_purchase_order(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    purchase_order_id: Uuid,
+    payload: &EditPurchaseOrderRequest,
+) -> Result<PurchaseOrder, ApiError> {
+    let order = sqlx::query_as::<_, PurchaseOrder>(
+        "UPDATE atlas.purchase_orders
+         SET supplier_id = COALESCE($1, supplier_id)
+         WHERE id = $2 AND tenant_id = $3 AND status = 'draft'
+         RETURNING id, store_id, supplier_id, status::text AS status",
+    )
+    .bind(payload.supplier_id)
+    .bind(purchase_order_id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a draft purchase order can be edited.",
+        codes::PURCHASE_ORDER_NOT_DRAFT,
+    ))?;
+
+    if let Some(lines) = &payload.lines {
+        if lines.is_empty() {
+            return Err(ApiError::bad_request("a purchase order must have at least one line"));
+        }
+        sqlx::query("DELETE FROM atlas.purchase_order_lines WHERE purchase_order_id = $1")
+            .bind(purchase_order_id)
+            .execute(&mut *conn)
+            .await?;
+        for line in lines {
+            sqlx::query(
+                "INSERT INTO atlas.purchase_order_lines
+                    (id, tenant_id, purchase_order_id, product_id, quantity_ordered, unit_cost_amount_minor)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(Uuid::now_v7())
+            .bind(tenant_id)
+            .bind(purchase_order_id)
+            .bind(line.product_id)
+            .bind(line.quantity_ordered)
+            .bind(line.unit_cost_amount_minor)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+
+    return Ok(order);
+}
+
+/// `draft` -> `ordered` (FR-21). The one submit/approve step this schema's granularity supports - see the migration comment.
+pub async fn submit_purchase_order(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    purchase_order_id: Uuid,
+) -> Result<PurchaseOrder, ApiError> {
+    return sqlx::query_as::<_, PurchaseOrder>(
+        "UPDATE atlas.purchase_orders
+         SET status = 'ordered', submitted_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND status = 'draft'
+         RETURNING id, store_id, supplier_id, status::text AS status",
+    )
+    .bind(purchase_order_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a draft purchase order can be submitted.",
+        codes::PURCHASE_ORDER_NOT_DRAFT,
+    ));
+}
+
+/// `draft` or `ordered` -> `cancelled` (FR-21). Not once anything has been received - that stock is already real.
+pub async fn cancel_purchase_order(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    purchase_order_id: Uuid,
+) -> Result<PurchaseOrder, ApiError> {
+    return sqlx::query_as::<_, PurchaseOrder>(
+        "UPDATE atlas.purchase_orders
+         SET status = 'cancelled', cancelled_at = now(), cancelled_by_user_id = $1
+         WHERE id = $2 AND tenant_id = $3 AND status IN ('draft', 'ordered')
+         RETURNING id, store_id, supplier_id, status::text AS status",
+    )
+    .bind(user_id)
+    .bind(purchase_order_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code(
+        "Only a draft or ordered purchase order can be cancelled - it has already been received.",
+        codes::PURCHASE_ORDER_NOT_CANCELLABLE,
+    ));
+}
+
+// === Purchase returns (FR-23)
+
+// Caps each line at what its GRN line has received minus what it's already returned.
+pub async fn record_purchase_return(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    payload: &RecordPurchaseReturnRequest,
+) -> Result<PurchaseReturn, ApiError> {
+    if payload.lines.is_empty() {
+        return Err(ApiError::bad_request("a purchase return must have at least one line"));
+    }
+
+    let (store_id, supplier_id): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT store_id, supplier_id FROM atlas.purchase_orders WHERE id = $1 AND tenant_id = $2",
+    )
+    .bind(payload.purchase_order_id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| ApiError::bad_request("Unknown purchase order."))?;
+
+    let return_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atlas.purchase_returns (id, tenant_id, store_id, supplier_id, purchase_order_id, reason, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(return_id)
+    .bind(tenant_id)
+    .bind(store_id)
+    .bind(supplier_id)
+    .bind(payload.purchase_order_id)
+    .bind(&payload.reason)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await?;
+
+    let mut lines = Vec::with_capacity(payload.lines.len());
+    let mut total_cost_owed_minor: i64 = 0;
+
+    for line in &payload.lines {
+        let (product_id, quantity_received, quantity_returned_so_far, unit_cost_amount_minor): (
+            Uuid,
+            Decimal,
+            Decimal,
+            i64,
+        ) = sqlx::query_as(
+            "SELECT grn.quantity_received, grn.quantity_returned, pol.product_id, pol.unit_cost_amount_minor
+             FROM atlas.goods_received_note_lines grn
+             JOIN atlas.purchase_order_lines pol ON pol.id = grn.purchase_order_line_id
+             WHERE grn.id = $1 AND pol.purchase_order_id = $2",
+        )
+        .bind(line.goods_received_note_line_id)
+        .bind(payload.purchase_order_id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(|(a, b, c, d): (Decimal, Decimal, Uuid, i64)| (c, a, b, d))
+        .ok_or_else(|| ApiError::bad_request("Unknown goods received note line for this purchase order."))?;
+
+        let remaining = quantity_received - quantity_returned_so_far;
+        if line.quantity > remaining {
+            return Err(ApiError::conflict_with_code(
+                format!("Cannot return {} - only {} eligible on this receipt line.", line.quantity, remaining),
+                codes::RETURN_QUANTITY_EXCEEDED,
+            ));
+        }
+
+        let posting_lines = [PostingLine {
+            product_id,
+            stock_item_id: None,
+            unit_id: None,
+            quantity: line.quantity,
+        }];
+        let movements = inventory::service::post(
+            conn,
+            Posting {
+                tenant_id,
+                store_id,
+                movement_type: MovementType::PurchaseReturn,
+                reason: &payload.reason,
+                reference_id: Some(return_id),
+                actor_user_id: user_id,
+                policy: NegativeStockPolicy::Reject,
+                source: "purchase_return",
+                lines: &posting_lines,
+            },
+        )
+        .await?;
+        let movement_id = movements[0].id;
+
+        sqlx::query("UPDATE atlas.goods_received_note_lines SET quantity_returned = quantity_returned + $2 WHERE id = $1")
+            .bind(line.goods_received_note_line_id)
+            .bind(line.quantity)
+            .execute(&mut *conn)
+            .await?;
+
+        let line_id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO atlas.purchase_return_lines
+                (id, tenant_id, purchase_return_id, goods_received_note_line_id, product_id, quantity, unit_cost_amount_minor, stock_movement_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(line_id)
+        .bind(tenant_id)
+        .bind(return_id)
+        .bind(line.goods_received_note_line_id)
+        .bind(product_id)
+        .bind(line.quantity)
+        .bind(unit_cost_amount_minor)
+        .bind(movement_id)
+        .execute(&mut *conn)
+        .await?;
+
+        let cost_owed_minor = (line.quantity * Decimal::from(unit_cost_amount_minor))
+            .round()
+            .to_i64()
+            .ok_or_else(|| ApiError::bad_request("returned cost out of range"))?;
+        total_cost_owed_minor += cost_owed_minor;
+
+        lines.push(PurchaseReturnLine {
+            id: line_id,
+            goods_received_note_line_id: line.goods_received_note_line_id,
+            product_id,
+            quantity: line.quantity,
+            unit_cost_amount_minor,
+        });
+    }
+
+    sqlx::query("UPDATE atlas.suppliers SET balance_amount_minor = balance_amount_minor - $2 WHERE id = $1")
+        .bind(supplier_id)
+        .bind(total_cost_owed_minor)
+        .execute(&mut *conn)
+        .await?;
+
+    return Ok(PurchaseReturn {
+        id: return_id,
+        store_id,
+        supplier_id,
+        purchase_order_id: payload.purchase_order_id,
+        reason: payload.reason.clone(),
+        lines,
+    });
 }
 
 // === Goods received notes

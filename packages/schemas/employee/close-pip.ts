@@ -1,9 +1,6 @@
-import { z } from 'zod';
-
-/* Mirrors closePip on the backend; outcome notes are optional. */
-export const closePipSchema = z.object({
-  status: z.enum(['passed', 'failed'], { message: 'Pick an outcome' }),
-  outcomeNotes: z.string(),
-});
-
-export type ClosePipValues = z.infer<typeof closePipSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

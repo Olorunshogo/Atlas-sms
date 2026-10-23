@@ -84,3 +84,46 @@ pub struct GoodsReceivedNoteData {
     pub id: Uuid,
     pub purchase_order: PurchaseOrder,
 }
+
+// === Purchase order lifecycle (FR-21)
+
+/// `draft` only - edit before approval. Lines, when present, replace the order's lines wholesale.
+#[derive(Debug, Deserialize)]
+pub struct EditPurchaseOrderRequest {
+    pub supplier_id: Option<Uuid>,
+    pub lines: Option<Vec<PurchaseOrderLineInput>>,
+}
+
+// === Purchase returns (FR-23)
+
+#[derive(Debug, Deserialize)]
+pub struct PurchaseReturnLineInput {
+    pub goods_received_note_line_id: Uuid,
+    pub quantity: rust_decimal::Decimal,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecordPurchaseReturnRequest {
+    pub purchase_order_id: Uuid,
+    pub reason: String,
+    pub lines: Vec<PurchaseReturnLineInput>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PurchaseReturnLine {
+    pub id: Uuid,
+    pub goods_received_note_line_id: Uuid,
+    pub product_id: Uuid,
+    pub quantity: rust_decimal::Decimal,
+    pub unit_cost_amount_minor: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PurchaseReturn {
+    pub id: Uuid,
+    pub store_id: Uuid,
+    pub supplier_id: Uuid,
+    pub purchase_order_id: Uuid,
+    pub reason: String,
+    pub lines: Vec<PurchaseReturnLine>,
+}

@@ -9,8 +9,9 @@ use crate::response::ApiEnvelope;
 use crate::roles;
 
 use super::models::{
-    CreatePurchaseOrderRequest, CreateSupplierRequest, GoodsReceivedNoteData, ListPurchaseOrdersQuery,
-    PurchaseOrder, PurchaseOrderLine, ReceiveGoodsRequest, Supplier, UpdateSupplierRequest,
+    CreatePurchaseOrderRequest, CreateSupplierRequest, EditPurchaseOrderRequest, GoodsReceivedNoteData,
+    ListPurchaseOrdersQuery, PurchaseOrder, PurchaseOrderLine, PurchaseReturn, ReceiveGoodsRequest,
+    RecordPurchaseReturnRequest, Supplier, UpdateSupplierRequest,
 };
 use super::service;
 
@@ -167,4 +168,73 @@ pub async fn receive_goods(
     .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Goods received.", grn)));
+}
+
+/**
+ * `PATCH /api/v1/purchase-orders/:id`.
+ * Requires `purchase.create` at the order's own store. `draft` only - see `service::edit_purchase_order`.
+ */
+pub async fn edit_purchase_order(
+    Path(purchase_order_id): Path<Uuid>,
+    mut tx: TenantTx,
+    Json(body): Json<EditPurchaseOrderRequest>,
+) -> Result<Json<ApiEnvelope<PurchaseOrder>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::purchase_order_store_id(&mut tx, purchase_order_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "purchase.create").await?;
+    let order = service::edit_purchase_order(&mut tx, tenant_id, purchase_order_id, &body).await?;
+    audit::record(&mut tx, tenant_id, user_id, "purchase_order", order.id, "purchase_order.edit", serde_json::to_value(&order).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Purchase order updated.", order)));
+}
+
+/**
+ * `POST /api/v1/purchase-orders/:id/submit`.
+ * Requires `purchase.create` at the order's own store. `draft` -> `ordered`.
+ */
+pub async fn submit_purchase_order(Path(purchase_order_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<PurchaseOrder>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::purchase_order_store_id(&mut tx, purchase_order_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "purchase.create").await?;
+    let order = service::submit_purchase_order(&mut tx, tenant_id, purchase_order_id).await?;
+    audit::record(&mut tx, tenant_id, user_id, "purchase_order", order.id, "purchase_order.submit", serde_json::to_value(&order).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Purchase order submitted.", order)));
+}
+
+/**
+ * `POST /api/v1/purchase-orders/:id/cancel`.
+ * Requires `purchase.create` at the order's own store. `draft` or `ordered` only - not once anything has been received.
+ */
+pub async fn cancel_purchase_order(Path(purchase_order_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<PurchaseOrder>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::purchase_order_store_id(&mut tx, purchase_order_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "purchase.create").await?;
+    let order = service::cancel_purchase_order(&mut tx, tenant_id, user_id, purchase_order_id).await?;
+    audit::record(&mut tx, tenant_id, user_id, "purchase_order", order.id, "purchase_order.cancel", serde_json::to_value(&order).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Purchase order cancelled.", order)));
+}
+
+// === Purchase returns (FR-23)
+
+/**
+ * `POST /api/v1/purchase-returns`.
+ * Requires `purchase.create` at the order's own store - see `service::record_purchase_return`'s doc comment.
+ */
+pub async fn record_purchase_return(
+    mut tx: TenantTx,
+    Json(body): Json<RecordPurchaseReturnRequest>,
+) -> Result<Json<ApiEnvelope<PurchaseReturn>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let store_id = service::purchase_order_store_id(&mut tx, body.purchase_order_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "purchase.create").await?;
+    let purchase_return = service::record_purchase_return(&mut tx, tenant_id, user_id, &body).await?;
+    audit::record(&mut tx, tenant_id, user_id, "purchase_return", purchase_return.id, "purchase_return.create", serde_json::to_value(&purchase_return).ok()).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Purchase return recorded.", purchase_return)));
 }

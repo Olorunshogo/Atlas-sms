@@ -30,8 +30,8 @@
         "parallel": false,
         "commands": [
           "nx reset",
-          "PGOPTIONS='-c search_path=public' sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\"",
-          "cargo run --manifest-path apps/atlas-backend/Cargo.toml"
+          "PGOPTIONS='-c search_path=public' sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$DATABASE_ADMIN_URL\"",
+          "ATLAS_DATABASE_URL=\"$DATABASE_URL\" cargo run --manifest-path apps/atlas-backend/Cargo.toml"
         ]
       }
     },

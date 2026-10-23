@@ -1,17 +1,6 @@
-import { z } from 'zod';
-import type { PhotoUpload } from '../../components/upload-field';
-
-export const deliveryVerificationSchema = z.object({
-  photos: z.custom<PhotoUpload[]>(
-    (value) => Array.isArray(value) && value.length > 0,
-    {
-      message: 'Please upload at least one photo',
-    },
-  ),
-  recipientName: z.string(),
-  notes: z.string(),
-});
-
-export type DeliveryVerificationValues = z.infer<
-  typeof deliveryVerificationSchema
->;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

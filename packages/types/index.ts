@@ -1,11 +1,5 @@
-// === Location types
-export * from './location';
-
-// === Signup configuration
-export * from './signup-config';
-
-// === Payment configuration
-export * from './payment-config';
-
-// === Legal document content model
-export * from './legal-document';
+/*
+ * All cleared - ported from the Debridgers reference source, not this
+ * domain. Files stay as placeholders for Atlas's own shared types.
+ * See docs/atlas/CONTEXT.md.
+ */

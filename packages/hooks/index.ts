@@ -1,21 +1,12 @@
-// === Auth
-export * from './auth';
-
-// === Payment
-export * from './payment';
-
-// === Utility hooks
-export * from './use-debounced-value';
-export * from './use-media-query';
-export * from './use-prefers-reduced-motion';
-export * from './use-async-resource';
-
-// === Notifications
-export * from './use-notifications-service';
-export * from './notifications-provider';
-
 // === Ratings
+// Not wired into Atlas yet - kept intact, to be built out and modified later.
 export * from './ratings';
 
-// === Dashboard navigation
-export * from './use-dashboard-nav';
+/*
+ * Everything else here (auth, payment, the generic utility hooks, dashboard
+ * nav, notifications) had its content cleared: auth and payment are already
+ * superseded by the real Vue composables in libs/shared/composables, and
+ * the generic hooks (debounce, media query, reduced motion) are now covered
+ * by @vueuse/core via @atlas/ui-core instead of an Atlas-owned copy. Files
+ * stay as placeholders. See docs/atlas/CONTEXT.md.
+ */

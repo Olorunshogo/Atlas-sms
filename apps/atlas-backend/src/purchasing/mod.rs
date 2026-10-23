@@ -15,7 +15,17 @@ pub fn suppliers_router() -> Router<AppState> {
 
 pub fn purchase_orders_router() -> Router<AppState> {
     return Router::new()
-        .route("/", get(handlers::list_purchase_orders).post(handlers::create_purchase_order))
+        .route(
+            "/",
+            get(handlers::list_purchase_orders).post(handlers::create_purchase_order),
+        )
+        .route("/{id}", patch(handlers::edit_purchase_order))
         .route("/{id}/lines", get(handlers::list_purchase_order_lines))
-        .route("/{id}/receive", post(handlers::receive_goods));
+        .route("/{id}/receive", post(handlers::receive_goods))
+        .route("/{id}/submit", post(handlers::submit_purchase_order))
+        .route("/{id}/cancel", post(handlers::cancel_purchase_order));
+}
+
+pub fn purchase_returns_router() -> Router<AppState> {
+    return Router::new().route("/", post(handlers::record_purchase_return));
 }

@@ -86,7 +86,9 @@ async fn unknown_routes_wrong_methods_and_missing_auth_are_json(pool: PgPool) {
     for path in ["/api/v1/nothing-here", "/api/v1/stock/unknown", "/elsewhere"] {
         assert_api_error(call_raw(&router, "GET", path, Some(&owner), None, "").await, StatusCode::NOT_FOUND, "ROUTE_NOT_FOUND");
     }
-    for (method, path) in [("DELETE", "/api/v1/stores"), ("PUT", "/api/v1/stock/transfers"), ("GET", "/api/v1/stock/transfers")] {
+    // GET /stock/transfers is a valid route (list transfers) since the FR-22
+    // staged-transfer workflow landed - PUT still covers "wrong method" here.
+    for (method, path) in [("DELETE", "/api/v1/stores"), ("PUT", "/api/v1/stock/transfers")] {
         assert_api_error(call_raw(&router, method, path, Some(&owner), None, "").await, StatusCode::METHOD_NOT_ALLOWED, "METHOD_NOT_ALLOWED");
     }
     for token in [None, Some("garbage")] {

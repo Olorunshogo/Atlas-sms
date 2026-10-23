@@ -52,11 +52,11 @@ another tenant's rows.
 
 **Headers.**
 
-| Header          | Used by        | Meaning                                                                                                    |
-| --------------- | -------------- | ---------------------------------------------------------------------------------------------------------- |
-| `Authorization` | all but auth   | `Bearer <access_token>`                                                                                    |
-| `X-Client-Type` | auth endpoints | `web` (default; tokens arrive as cookies) or `app` (POS; tokens arrive in the JSON body)                   |
-| `x-store-id`    | customers      | The store the caller is working at. Customer endpoints check permissions against it, see Section 15.      |
+| Header          | Used by        | Meaning                                                                                              |
+| --------------- | -------------- | ---------------------------------------------------------------------------------------------------- |
+| `Authorization` | all but auth   | `Bearer <access_token>`                                                                              |
+| `X-Client-Type` | auth endpoints | `web` (default; tokens arrive as cookies) or `app` (POS; tokens arrive in the JSON body)             |
+| `x-store-id`    | customers      | The store the caller is working at. Customer endpoints check permissions against it, see Section 15. |
 
 **Permissions.** "Permission" below names the `atlas.permission` the
 caller must hold. "at the store" means at the store the request concerns
@@ -76,7 +76,11 @@ Only `data` is shown in the examples below. Two endpoints can also answer
 **Error envelope.** Every error is:
 
 ```json
-{ "message": "Payments of 4500 don't cover the 5000 due.", "success": false, "code": "PAYMENT_INSUFFICIENT" }
+{
+  "message": "Payments of 4500 don't cover the 5000 due.",
+  "success": false,
+  "code": "PAYMENT_INSUFFICIENT"
+}
 ```
 
 `code` is present when the client can act on it; Section 17 lists them.
@@ -135,30 +139,34 @@ exceeded). Full flow and cookie details: [auth-flow.md](auth-flow.md).
 
 ```json
 {
-  "access_token": "eyJ...",      // X-Client-Type: app only
-  "refresh_token": "opaque...",  // X-Client-Type: app only
+  "access_token": "eyJ...", // X-Client-Type: app only
+  "refresh_token": "opaque...", // X-Client-Type: app only
   "tenant_id": "0192...",
-  "user": { "id": "0192...", "full_name": "Ada Obi", "email": "ada@example.com" }
+  "user": {
+    "id": "0192...",
+    "full_name": "Ada Obi",
+    "email": "ada@example.com"
+  }
 }
 ```
 
 For `X-Client-Type: web` the two tokens are omitted from the body and set
 as `access_token` / `refresh_token` HttpOnly cookies instead.
 
-| Method & path                          | Auth                    | Body                                                       | `data` on success                     |
-| -------------------------------------- | ----------------------- | ---------------------------------------------------------- | ------------------------------------- |
-| `POST /auth/signup`                    | none                    | `{ full_name, email, phone, password, tenant_name }`       | `{ email }`, status `201`; emails an OTP |
-| `POST /auth/verify-email`              | none                    | `{ email, code }`                                          | `null`; activates the owner grant     |
-| `POST /auth/login`                     | none                    | `{ email, password, tenant_id? }`                          | session                               |
-| `POST /auth/refresh`                   | refresh token           | `{ refresh_token }` (app) or empty with cookie (web)       | session (refresh token rotated)       |
-| `POST /auth/logout`                    | refresh token           | same as refresh                                            | `null`; revokes the refresh token     |
-| `GET /auth/me`                         | access token            | -                                                          | `{ user, tenant_id, is_platform_admin, tenants: [{ id, name }] }` |
-| `POST /auth/switch-tenant`             | access token            | `{ tenant_id }`                                            | session for the other tenant          |
-| `POST /auth/forgot-password`           | none                    | `{ email }`                                                | `null`; always succeeds, emails an OTP if the account exists |
-| `POST /auth/reset-password`            | OTP                     | `{ email, code, new_password }`                            | `null`                                |
-| `POST /auth/invites/{token}/accept`    | invite token            | `{ full_name, phone, password }` (ignored for an existing account) | `null`                        |
-| `GET /auth/platform/tenants`           | platform grant          | -                                                          | `[{ id, name }]`                      |
-| `POST /auth/platform/invite`           | platform grant          | `{ email }`                                                | `null`                                |
+| Method & path                       | Auth           | Body                                                               | `data` on success                                                 |
+| ----------------------------------- | -------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `POST /auth/signup`                 | none           | `{ full_name, email, phone, password, tenant_name }`               | `{ email }`, status `201`; emails an OTP                          |
+| `POST /auth/verify-email`           | none           | `{ email, code }`                                                  | `null`; activates the owner grant                                 |
+| `POST /auth/login`                  | none           | `{ email, password, tenant_id? }`                                  | session                                                           |
+| `POST /auth/refresh`                | refresh token  | `{ refresh_token }` (app) or empty with cookie (web)               | session (refresh token rotated)                                   |
+| `POST /auth/logout`                 | refresh token  | same as refresh                                                    | `null`; revokes the refresh token                                 |
+| `GET /auth/me`                      | access token   | -                                                                  | `{ user, tenant_id, is_platform_admin, tenants: [{ id, name }] }` |
+| `POST /auth/switch-tenant`          | access token   | `{ tenant_id }`                                                    | session for the other tenant                                      |
+| `POST /auth/forgot-password`        | none           | `{ email }`                                                        | `null`; always succeeds, emails an OTP if the account exists      |
+| `POST /auth/reset-password`         | OTP            | `{ email, code, new_password }`                                    | `null`                                                            |
+| `POST /auth/invites/{token}/accept` | invite token   | `{ full_name, phone, password }` (ignored for an existing account) | `null`                                                            |
+| `GET /auth/platform/tenants`        | platform grant | -                                                                  | `[{ id, name }]`                                                  |
+| `POST /auth/platform/invite`        | platform grant | `{ email }`                                                        | `null`                                                            |
 
 Auth-specific errors:
 
@@ -197,7 +205,11 @@ Permission `staff.invite` at the store (or tenant-wide when `store_id` is
 null), and the caller must hold every permission the role carries.
 
 ```json
-{ "email": "cashier@example.com", "role_id": "0000...0004", "store_id": "0192..." }
+{
+  "email": "cashier@example.com",
+  "role_id": "0000...0004",
+  "store_id": "0192..."
+}
 ```
 
 `data`: `{ "outcome": "granted_existing" }` when the email already has a
@@ -231,7 +243,12 @@ Permission `store.update` at that store, so a store-scoped admin can edit
 their own branch and no other.
 
 ```json
-{ "name": "Lekki Branch", "slug": "lekki", "address": "12 Admiralty Way", "is_active": false }
+{
+  "name": "Lekki Branch",
+  "slug": "lekki",
+  "address": "12 Admiralty Way",
+  "is_active": false
+}
 ```
 
 All optional; an empty body is `400`, `address: null` (or blank) clears the
@@ -252,7 +269,7 @@ Permission `sale.create` or `store.update` at the store. `data`:
   "currency": "NGN",
   "timezone": "Africa/Lagos",
   "prices_include_tax": true,
-  "default_tax_rate_id": "0192..." ,
+  "default_tax_rate_id": "0192...",
   "cash_rounding_increment_minor": 1,
   "max_cashier_discount_basis_points": 0,
   "allow_negative_stock": false,
@@ -268,18 +285,18 @@ Permission `sale.create` or `store.update` at the store. `data`:
 }
 ```
 
-| Field                               | Effect                                                                                                   |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `prices_include_tax`                | Price rules already include tax (tax is carved out) or exclude it (tax is added on top).                  |
-| `default_tax_rate_id`               | Rate for products with no rate of their own. `null` means no tax.                                         |
+| Field                               | Effect                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `prices_include_tax`                | Price rules already include tax (tax is carved out) or exclude it (tax is added on top).                     |
+| `default_tax_rate_id`               | Rate for products with no rate of their own. `null` means no tax.                                            |
 | `cash_rounding_increment_minor`     | `1` is no rounding; `500` rounds a cash total to the nearest N5. The difference is a separate rounding line. |
-| `max_cashier_discount_basis_points` | Discount (share of gross) anyone may give; above it needs `sale.discount`.                                |
-| `allow_negative_stock`              | Lets a live sale take stock below zero instead of failing `PRODUCT_OUT_OF_STOCK`.                          |
-| `allow_pay_later`                   | Lets a sale with a named customer complete before it's fully paid.                                        |
-| `receipt_prefix`                    | Prefix of receipt and return numbers; defaults to the first four letters/digits of the slug, upper-cased. |
-| `return_window_days`                | Returns need approval after the end of this many local days after the sale.                               |
-| `refund_approval_threshold_minor`   | A return refund at or above this needs approval. `null` means no amount limit.                            |
-| `restockable_conditions`            | Item conditions that go back into saleable stock on return.                                               |
+| `max_cashier_discount_basis_points` | Discount (share of gross) anyone may give; above it needs `sale.discount`.                                   |
+| `allow_negative_stock`              | Lets a live sale take stock below zero instead of failing `PRODUCT_OUT_OF_STOCK`.                            |
+| `allow_pay_later`                   | Lets a sale with a named customer complete before it's fully paid.                                           |
+| `receipt_prefix`                    | Prefix of receipt and return numbers; defaults to the first four letters/digits of the slug, upper-cased.    |
+| `return_window_days`                | Returns need approval after the end of this many local days after the sale.                                  |
+| `refund_approval_threshold_minor`   | A return refund at or above this needs approval. `null` means no amount limit.                               |
+| `restockable_conditions`            | Item conditions that go back into saleable stock on return.                                                  |
 
 ### `PATCH /stores/{id}/settings`
 
@@ -321,9 +338,16 @@ Product shape:
 
 ```json
 {
-  "id": "0192...", "tenant_id": "0192...", "product_type_id": "0192...",
-  "base_unit_id": "0192...", "name": "Rice 50kg", "sku": "RICE-50",
-  "attributes": {}, "is_active": true, "tax_rate_id": null, "is_returnable": true
+  "id": "0192...",
+  "tenant_id": "0192...",
+  "product_type_id": "0192...",
+  "base_unit_id": "0192...",
+  "name": "Rice 50kg",
+  "sku": "RICE-50",
+  "attributes": {},
+  "is_active": true,
+  "tax_rate_id": null,
+  "is_returnable": true
 }
 ```
 
@@ -334,7 +358,14 @@ Any member. The product shape above; `404` if unknown or another tenant's.
 ### `PATCH /products/{id}`
 
 ```json
-{ "name": "Premium Rice", "sku": "RICE-PREM", "attributes": { "grade": "A" }, "is_active": true, "is_returnable": false, "tax_rate_id": "0192..." }
+{
+  "name": "Premium Rice",
+  "sku": "RICE-PREM",
+  "attributes": { "grade": "A" },
+  "is_active": true,
+  "is_returnable": false,
+  "tax_rate_id": "0192..."
+}
 ```
 
 All optional, but an empty body is `400`. `tax_rate_id: null` clears it back
@@ -371,12 +402,13 @@ product (`404` otherwise).
 
 ```json
 {
-  "store_id": "0192...",          // null = every store
-  "customer_group_id": null,      // null = every customer
-  "min_quantity": "10",           // in base units; default 1
+  "store_id": "0192...", // null = every store
+  "customer_group_id": null, // null = every customer
+  "min_quantity": "10", // in base units; default 1
   "unit_price_amount_minor": 1500, // per base unit
   "priority": 0,
-  "starts_at": null, "ends_at": null
+  "starts_at": null,
+  "ends_at": null
 }
 ```
 
@@ -424,17 +456,37 @@ Active products listed at the store whose name or SKU contains `q`, or
 whose barcode is exactly `q` (sorted first).
 
 ```json
-[{
-  "product_id": "0192...", "name": "Long Grain Rice", "sku": "RICE",
-  "identity_mode": "by_product", "is_returnable": true, "base_unit_id": "0192...",
-  "tax_rate_id": "0192...", "tax_rate_basis_points": 750, "on_hand": "1000",
-  "units": [
-    { "unit_id": "0192...", "name": "Kilogram", "abbreviation": "kg", "factor_to_base": "1",
-      "unit_price_amount_minor": 1500, "barcodes": [] },
-    { "unit_id": "0192...", "name": "Bag 50kg", "abbreviation": "bag", "factor_to_base": "50",
-      "unit_price_amount_minor": 75000, "barcodes": ["6151234500017"] }
-  ]
-}]
+[
+  {
+    "product_id": "0192...",
+    "name": "Long Grain Rice",
+    "sku": "RICE",
+    "identity_mode": "by_product",
+    "is_returnable": true,
+    "base_unit_id": "0192...",
+    "tax_rate_id": "0192...",
+    "tax_rate_basis_points": 750,
+    "on_hand": "1000",
+    "units": [
+      {
+        "unit_id": "0192...",
+        "name": "Kilogram",
+        "abbreviation": "kg",
+        "factor_to_base": "1",
+        "unit_price_amount_minor": 1500,
+        "barcodes": []
+      },
+      {
+        "unit_id": "0192...",
+        "name": "Bag 50kg",
+        "abbreviation": "bag",
+        "factor_to_base": "50",
+        "unit_price_amount_minor": 75000,
+        "barcodes": ["6151234500017"]
+      }
+    ]
+  }
+]
 ```
 
 `unit_price_amount_minor` is the walk-in price for one of that unit right
@@ -455,9 +507,14 @@ Prices a cart without saving anything.
   "customer_id": null,
   "lines": [
     { "product_id": "0192...", "unit_id": "0192...", "quantity": "2" },
-    { "product_id": "0192...", "unit_id": "0192...", "quantity": "1",
-      "unit_price_amount_minor": 300, "price_override_reason": "Dented tin",
-      "discount": { "amount_minor": 50, "reason": "Loyal customer" } }
+    {
+      "product_id": "0192...",
+      "unit_id": "0192...",
+      "quantity": "1",
+      "unit_price_amount_minor": 300,
+      "price_override_reason": "Dented tin",
+      "discount": { "amount_minor": 50, "reason": "Loyal customer" }
+    }
   ],
   "cart_discount": { "percent_basis_points": 500, "reason": "Promo" }
 }
@@ -473,25 +530,50 @@ Line fields: `id?` (client line id), `product_id`, `stock_item_id?`
 
 ```json
 {
-  "store_id": "0192...", "currency": "NGN", "prices_include_tax": true,
-  "customer_id": null, "customer_group_id": null,
-  "lines": [{
-    "line_number": 1, "client_line_id": null, "product_id": "0192...",
-    "product_name": "Radio", "sku": "RADIO", "is_returnable": true,
-    "stock_item_id": null, "unit_id": "0192...", "unit_name": "Each",
-    "quantity": "1", "base_quantity": "1",
-    "list_unit_price_amount_minor": 107500, "unit_price_amount_minor": 107500,
-    "price_rule_id": "0192...", "price_overridden": false, "price_override_reason": null,
-    "gross_amount_minor": 107500, "line_discount_amount_minor": 0,
-    "allocated_cart_discount_amount_minor": 0, "net_amount_minor": 107500,
-    "tax_rate_id": "0192...", "tax_rate_basis_points": 750, "tax_amount_minor": 7500,
-    "line_total_amount_minor": 107500, "on_hand": "10"
-  }],
-  "subtotal_amount_minor": 107500, "discount_amount_minor": 0,
-  "cart_discount_amount_minor": 0, "discount_reason": null,
-  "tax_amount_minor": 7500, "total_amount_minor": 107500,
-  "cash_total_amount_minor": 107500, "cash_rounding_increment_minor": 1,
-  "price_overridden": false, "priced_at": "2026-10-22T14:03:00Z",
+  "store_id": "0192...",
+  "currency": "NGN",
+  "prices_include_tax": true,
+  "customer_id": null,
+  "customer_group_id": null,
+  "lines": [
+    {
+      "line_number": 1,
+      "client_line_id": null,
+      "product_id": "0192...",
+      "product_name": "Radio",
+      "sku": "RADIO",
+      "is_returnable": true,
+      "stock_item_id": null,
+      "unit_id": "0192...",
+      "unit_name": "Each",
+      "quantity": "1",
+      "base_quantity": "1",
+      "list_unit_price_amount_minor": 107500,
+      "unit_price_amount_minor": 107500,
+      "price_rule_id": "0192...",
+      "price_overridden": false,
+      "price_override_reason": null,
+      "gross_amount_minor": 107500,
+      "line_discount_amount_minor": 0,
+      "allocated_cart_discount_amount_minor": 0,
+      "net_amount_minor": 107500,
+      "tax_rate_id": "0192...",
+      "tax_rate_basis_points": 750,
+      "tax_amount_minor": 7500,
+      "line_total_amount_minor": 107500,
+      "on_hand": "10"
+    }
+  ],
+  "subtotal_amount_minor": 107500,
+  "discount_amount_minor": 0,
+  "cart_discount_amount_minor": 0,
+  "discount_reason": null,
+  "tax_amount_minor": 7500,
+  "total_amount_minor": 107500,
+  "cash_total_amount_minor": 107500,
+  "cash_rounding_increment_minor": 1,
+  "price_overridden": false,
+  "priced_at": "2026-10-22T14:03:00Z",
   "violations": []
 }
 ```
@@ -542,14 +624,18 @@ those count toward the total). `403` when the caller can view no store at
 all. Products by name, locations by store creation order:
 
 ```json
-[{
-  "product_id": "0192...", "product_name": "Rice", "total_quantity": "43",
-  "locations": [
-    { "store_id": "0192...", "store_name": "Lagos", "quantity": "20" },
-    { "store_id": "0192...", "store_name": "Abuja", "quantity": "15" },
-    { "store_id": "0192...", "store_name": "Kaduna", "quantity": "8" }
-  ]
-}]
+[
+  {
+    "product_id": "0192...",
+    "product_name": "Rice",
+    "total_quantity": "43",
+    "locations": [
+      { "store_id": "0192...", "store_name": "Lagos", "quantity": "20" },
+      { "store_id": "0192...", "store_name": "Abuja", "quantity": "15" },
+      { "store_id": "0192...", "store_name": "Kaduna", "quantity": "8" }
+    ]
+  }
+]
 ```
 
 `total_quantity` is summed from the locations at read time; it is never
@@ -574,26 +660,85 @@ Permission `stock.adjust` at the store. A count correction or write-off;
 never blocked by the stock check.
 
 ```json
-{ "store_id": "0192...", "product_id": "0192...", "stock_item_id": null, "quantity": "-3", "reason": "Damaged in storage" }
+{
+  "store_id": "0192...",
+  "product_id": "0192...",
+  "stock_item_id": null,
+  "quantity": "-3",
+  "reason": "Damaged in storage"
+}
 ```
 
 `quantity` is signed and non-zero, in base units. Returns the movement:
 `{ id, store_id, product_id, stock_item_id, movement_type, quantity, reason }`.
 
+### Inter-store transfers (FR-22)
+
+Staged: `requested` -> `approved` -> `dispatched` -> `received`, with
+`rejected` and `cancelled` as exits. Stock actually leaves the sending
+store only at dispatch and arrives at the receiving store only at
+receive - the gap between the two is a documented in-transit state, so a
+transfer is never countable as available at both stores at once.
+
+### `GET /stock/transfers?store_id=`
+
+Permission `stock.view` at the store. Every transfer touching that store,
+either direction, newest first.
+
 ### `POST /stock/transfers`
 
-Permission `stock.transfer` at both stores.
+Permission `stock.transfer` at the sending store.
 
 ```json
-{ "from_store_id": "0192...", "to_store_id": "0192...", "product_id": "0192...", "stock_item_id": null, "quantity": "60", "reason": "Rebalance" }
+{
+  "from_store_id": "0192...",
+  "to_store_id": "0192...",
+  "product_id": "0192...",
+  "stock_item_id": null,
+  "quantity": "60",
+  "reason": "Rebalance"
+}
 ```
 
-`data`: `{ out_movement, in_movement }`. `409 PRODUCT_OUT_OF_STOCK` if the
-sending store doesn't have it (checked under a lock, so two transfers
-can't both take the same units). `409 STORE_INACTIVE` or `PRODUCT_INACTIVE`
-if either store or the product is deactivated, and `404` for a store or
-product that is not in the caller's tenant (this applies to every stock
-write: sales, returns, purchases and adjustments as well).
+`409 PRODUCT_OUT_OF_STOCK` if the sending store doesn't have enough right
+now - an honest early rejection, not a hold; the authoritative check is at
+dispatch. `409 STORE_INACTIVE` or `PRODUCT_INACTIVE` if either store or
+the product is deactivated, and `404` for a store or product that is not
+in the caller's tenant (this applies to every stock write: sales, returns,
+purchases and adjustments as well).
+
+### `POST /stock/transfers/{id}/approve`
+
+Permission `stock.transfer` at both stores - moving stock into a branch is
+as much a receiving-store decision as a sending-store one. `409
+TRANSFER_NOT_REQUESTED` outside the `requested` state.
+
+### `POST /stock/transfers/{id}/reject`
+
+Permission `stock.transfer` at the receiving store. `409
+TRANSFER_NOT_REQUESTED` outside the `requested` state.
+
+### `POST /stock/transfers/{id}/cancel`
+
+Permission `stock.transfer` at the sending store. Allowed from
+`requested` or `approved` only - once dispatched, the stock has already
+left, so there is nothing left to simply cancel. `409
+TRANSFER_NOT_CANCELLABLE` otherwise.
+
+### `POST /stock/transfers/{id}/dispatch`
+
+Permission `stock.transfer` at the sending store. This is where stock
+actually leaves: posts the `transfer_out` movement, under the same
+atomic-claim-then-post pattern as a sale, so two concurrent dispatches
+can't both take the same units. `409 TRANSFER_NOT_APPROVED` outside the
+`approved` state; `409 PRODUCT_OUT_OF_STOCK` if the posting itself would
+go negative.
+
+### `POST /stock/transfers/{id}/receive`
+
+Permission `stock.transfer` at the receiving store. Posts the
+`transfer_in` movement. `409 TRANSFER_NOT_DISPATCHED` outside the
+`dispatched` state.
 
 ---
 
@@ -610,16 +755,59 @@ through goods receipts.
 
 Permission `purchase.create` at the store.
 `[{ id, store_id, supplier_id, status }]`, newest first. Status is
-`draft`, `partially_received` or `received`.
+`draft`, `ordered`, `partially_received`, `received` or `cancelled`.
 
 ### `POST /purchase-orders`
 
 Permission `purchase.create` at the store.
 
 ```json
-{ "store_id": "0192...", "supplier_id": "0192...",
-  "lines": [{ "product_id": "0192...", "quantity_ordered": "10", "unit_cost_amount_minor": 500 }] }
+{
+  "store_id": "0192...",
+  "supplier_id": "0192...",
+  "lines": [
+    {
+      "product_id": "0192...",
+      "quantity_ordered": "10",
+      "unit_cost_amount_minor": 500
+    }
+  ]
+}
 ```
+
+### `PATCH /purchase-orders/{id}` (FR-21)
+
+Permission `purchase.create` at the order's store. `draft` only - edit
+before approval.
+
+```json
+{
+  "supplier_id": "0192...",
+  "lines": [
+    {
+      "product_id": "0192...",
+      "quantity_ordered": "20",
+      "unit_cost_amount_minor": 450
+    }
+  ]
+}
+```
+
+Both fields optional; `lines`, when given, replaces the order's lines
+wholesale. `409 PURCHASE_ORDER_NOT_DRAFT` outside `draft`.
+
+### `POST /purchase-orders/{id}/submit` (FR-21)
+
+Permission `purchase.create` at the order's store. `draft` -> `ordered` -
+this schema's granularity merges submit and approve into one step rather
+than a separate pending-approval state. `409 PURCHASE_ORDER_NOT_DRAFT`
+outside `draft`.
+
+### `POST /purchase-orders/{id}/cancel` (FR-21)
+
+Permission `purchase.create` at the order's store. `draft` or `ordered`
+only - not once anything has been received. `409
+PURCHASE_ORDER_NOT_CANCELLABLE` otherwise.
 
 ### `GET /purchase-orders/{id}/lines`
 
@@ -638,6 +826,70 @@ order's status is recomputed.
 
 `data`: `{ id, purchase_order }`. `400` when a line would receive more
 than is left on it.
+
+### `POST /purchase-returns` (FR-23)
+
+Permission `purchase.create` at the order's store. References a goods
+received note line, not the order line directly - that is what tracks
+how much was actually received and so is eligible to go back.
+
+```json
+{
+  "purchase_order_id": "0192...",
+  "reason": "Damaged in transit",
+  "lines": [{ "goods_received_note_line_id": "0192...", "quantity": "3" }]
+}
+```
+
+Posts a `purchase_return` stock movement per line (reducing stock) and
+reduces the supplier's balance by the line's original received cost.
+`409 RETURN_QUANTITY_EXCEEDED` if a line would return more than that GRN
+line has received minus what it has already returned.
+
+---
+
+## 9b. Expenses (FR-24)
+
+### `GET /expense-categories` / `POST /expense-categories`
+
+List is any member; create needs `expense.manage`. Body `{ name }`.
+
+### `GET /expenses?store_id=&category_id=&status=&created_by_user_id=&from=&to=`
+
+Requires `expense.manage` at `store_id` when given. All filters optional.
+
+### `POST /expenses`
+
+Requires `expense.manage` at the store.
+
+```json
+{
+  "store_id": "0192...",
+  "category_id": "0192...",
+  "amount_minor": 450000,
+  "expense_date": "2026-10-23",
+  "description": "Electricity",
+  "reference": null
+}
+```
+
+Starts `draft`, `payment_status` `unpaid`.
+
+### `PATCH /expenses/{id}`
+
+`draft` only. All fields optional. `409 EXPENSE_NOT_DRAFT` otherwise.
+
+### `POST /expenses/{id}/submit`
+
+`draft` -> `submitted`. `409 EXPENSE_NOT_DRAFT` otherwise.
+
+### `POST /expenses/{id}/approve` / `POST /expenses/{id}/reject`
+
+`submitted` -> `approved`/`rejected`. `409 EXPENSE_NOT_SUBMITTED` otherwise.
+
+### `POST /expenses/{id}/pay`
+
+`approved` only, sets `payment_status` to `paid`. `409 EXPENSE_NOT_APPROVED` otherwise.
 
 ---
 
@@ -660,7 +912,9 @@ closed shift plus its drawer count:
 
 ```json
 {
-  "id": "0192...", "status": "closed", "...": "...",
+  "id": "0192...",
+  "status": "closed",
+  "...": "...",
   "cash": {
     "opening_cash_minor": 0,
     "cash_collected_minor": 5000,
@@ -668,7 +922,7 @@ closed shift plus its drawer count:
     "expected_cash_minor": 5000,
     "counted_cash_minor": 4500,
     "variance_minor": -500,
-    "by_method": [ { "...": "see Section 16" } ]
+    "by_method": [{ "...": "see Section 16" }]
   }
 }
 ```
@@ -686,20 +940,35 @@ Returned by checkout, `GET /sales/{id}` and lookups:
 
 ```json
 {
-  "id": "0192...", "store_id": "0192...", "shift_id": "0192...",
-  "customer_id": null, "cashier_user_id": "0192...", "device_id": "till-1",
-  "status": "completed", "receipt_number": "IKJ-00000042", "currency": "NGN",
-  "subtotal_amount_minor": 150000, "discount_amount_minor": 0,
-  "cart_discount_amount_minor": 0, "discount_reason": null,
-  "tax_amount_minor": 0, "total_amount_minor": 150000,
-  "rounding_adjustment_minor": 0, "amount_paid_minor": 150000,
-  "amount_refunded_minor": 0, "payment_status": "paid",
-  "prices_include_tax": true, "price_overridden": false,
-  "client_created_at": null, "created_at": "2026-10-22T14:03:00Z",
-  "completed_at": "2026-10-22T14:03:00Z", "voided_at": null, "voided_by_user_id": null,
-  "lines": [ "...sale lines..." ],
-  "payments": [ "...payments, Section 13..." ],
-  "refunds": [ "...refunds, Section 14..." ]
+  "id": "0192...",
+  "store_id": "0192...",
+  "shift_id": "0192...",
+  "customer_id": null,
+  "cashier_user_id": "0192...",
+  "device_id": "till-1",
+  "status": "completed",
+  "receipt_number": "IKJ-00000042",
+  "currency": "NGN",
+  "subtotal_amount_minor": 150000,
+  "discount_amount_minor": 0,
+  "cart_discount_amount_minor": 0,
+  "discount_reason": null,
+  "tax_amount_minor": 0,
+  "total_amount_minor": 150000,
+  "rounding_adjustment_minor": 0,
+  "amount_paid_minor": 150000,
+  "amount_refunded_minor": 0,
+  "payment_status": "paid",
+  "prices_include_tax": true,
+  "price_overridden": false,
+  "client_created_at": null,
+  "created_at": "2026-10-22T14:03:00Z",
+  "completed_at": "2026-10-22T14:03:00Z",
+  "voided_at": null,
+  "voided_by_user_id": null,
+  "lines": ["...sale lines..."],
+  "payments": ["...payments, Section 13..."],
+  "refunds": ["...refunds, Section 14..."]
 }
 ```
 
@@ -724,17 +993,27 @@ one transaction.
 
 ```json
 {
-  "id": "0192f6a0-...",                 // client-generated UUIDv7, the idempotency key
+  "id": "0192f6a0-...", // client-generated UUIDv7, the idempotency key
   "store_id": "0192...",
   "shift_id": "0192...",
-  "customer_id": null,                   // null = walk-in
+  "customer_id": null, // null = walk-in
   "device_id": "till-1",
   "client_created_at": "2026-10-22T14:02:58Z",
-  "lines": [ { "product_id": "0192...", "unit_id": "0192...", "quantity": "2" } ],
+  "lines": [{ "product_id": "0192...", "unit_id": "0192...", "quantity": "2" }],
   "cart_discount": null,
   "payments": [
-    { "id": "0192...", "payment_method_id": "0192...", "amount_minor": 100000, "tendered_amount_minor": 120000 },
-    { "id": "0192...", "payment_method_id": "0192...", "amount_minor": 50000, "reference": "TRF-55501234" }
+    {
+      "id": "0192...",
+      "payment_method_id": "0192...",
+      "amount_minor": 100000,
+      "tendered_amount_minor": 120000
+    },
+    {
+      "id": "0192...",
+      "payment_method_id": "0192...",
+      "amount_minor": 50000,
+      "reference": "TRF-55501234"
+    }
   ],
   "expected_total_amount_minor": 150000
 }
@@ -746,13 +1025,13 @@ one transaction.
 
 The payments decide the outcome:
 
-| Payments                                                     | Result                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------- |
-| Successful payments equal the amount due                     | `completed`, `paid`, receipt issued, stock taken              |
-| Successful + pending equal the amount due                    | `awaiting_payment`; completes when the pending one succeeds    |
-| Short, store allows pay-later, sale has a customer           | `completed`, `partially_paid` or `unpaid`                      |
-| Short otherwise                                              | `400 PAYMENT_INSUFFICIENT`, nothing written                    |
-| More than due                                                | `400 PAYMENT_OVERPAID`                                         |
+| Payments                                           | Result                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------- |
+| Successful payments equal the amount due           | `completed`, `paid`, receipt issued, stock taken            |
+| Successful + pending equal the amount due          | `awaiting_payment`; completes when the pending one succeeds |
+| Short, store allows pay-later, sale has a customer | `completed`, `partially_paid` or `unpaid`                   |
+| Short otherwise                                    | `400 PAYMENT_INSUFFICIENT`, nothing written                 |
+| More than due                                      | `400 PAYMENT_OVERPAID`                                      |
 
 The amount due includes cash rounding when any payment is cash.
 
@@ -842,26 +1121,84 @@ JSON (`format` omitted or `json`), `data`:
 
 ```json
 {
-  "sale_id": "0192...", "receipt_number": "IKJ-00000042", "issued_at": "...",
+  "sale_id": "0192...",
+  "receipt_number": "IKJ-00000042",
+  "issued_at": "...",
   "snapshot": {
     "version": 1,
-    "business": { "name": "Ada Stores", "legal_name": "Ada Stores Ltd", "tax_identification_number": "..." },
-    "store": { "id": "...", "name": "...", "address": "...", "phone": "...", "receipt_header": null, "receipt_footer": "...", "currency": "NGN", "timezone": "Africa/Lagos" },
-    "transaction_id": "0192...", "short_transaction_id": "9F3A12C4",
-    "receipt_number": "IKJ-00000042", "issued_at": "...", "local_time": "2026-10-22 15:03",
-    "cashier_name": "Bola", "customer_name": "Walk-in customer", "device_id": "till-1",
+    "business": {
+      "name": "Ada Stores",
+      "legal_name": "Ada Stores Ltd",
+      "tax_identification_number": "..."
+    },
+    "store": {
+      "id": "...",
+      "name": "...",
+      "address": "...",
+      "phone": "...",
+      "receipt_header": null,
+      "receipt_footer": "...",
+      "currency": "NGN",
+      "timezone": "Africa/Lagos"
+    },
+    "transaction_id": "0192...",
+    "short_transaction_id": "9F3A12C4",
+    "receipt_number": "IKJ-00000042",
+    "issued_at": "...",
+    "local_time": "2026-10-22 15:03",
+    "cashier_name": "Bola",
+    "customer_name": "Walk-in customer",
+    "device_id": "till-1",
     "prices_include_tax": true,
-    "lines": [{ "line_number": 1, "name": "Pressing Iron", "sku": "IRON", "quantity": "1", "unit_name": "Each",
-                "unit_price_amount_minor": 21500, "gross_amount_minor": 21500, "discount_amount_minor": 0,
-                "tax_rate_basis_points": 750, "tax_amount_minor": 1500, "line_total_amount_minor": 21500 }],
-    "subtotal_amount_minor": 23650, "discount_amount_minor": 0, "tax_amount_minor": 1650,
-    "tax_breakdown": [{ "rate_basis_points": 750, "taxable_amount_minor": 23650, "tax_amount_minor": 1650 }],
-    "rounding_adjustment_minor": 0, "total_amount_minor": 23650, "amount_due_minor": 23650,
-    "payments": [{ "method_name": "Bank transfer", "kind": "transfer", "amount_minor": 13650,
-                   "tendered_amount_minor": null, "change_amount_minor": 0, "reference": "****1234", "status": "succeeded" }],
-    "amount_paid_minor": 23650, "balance_minor": 0
+    "lines": [
+      {
+        "line_number": 1,
+        "name": "Pressing Iron",
+        "sku": "IRON",
+        "quantity": "1",
+        "unit_name": "Each",
+        "unit_price_amount_minor": 21500,
+        "gross_amount_minor": 21500,
+        "discount_amount_minor": 0,
+        "tax_rate_basis_points": 750,
+        "tax_amount_minor": 1500,
+        "line_total_amount_minor": 21500
+      }
+    ],
+    "subtotal_amount_minor": 23650,
+    "discount_amount_minor": 0,
+    "tax_amount_minor": 1650,
+    "tax_breakdown": [
+      {
+        "rate_basis_points": 750,
+        "taxable_amount_minor": 23650,
+        "tax_amount_minor": 1650
+      }
+    ],
+    "rounding_adjustment_minor": 0,
+    "total_amount_minor": 23650,
+    "amount_due_minor": 23650,
+    "payments": [
+      {
+        "method_name": "Bank transfer",
+        "kind": "transfer",
+        "amount_minor": 13650,
+        "tendered_amount_minor": null,
+        "change_amount_minor": 0,
+        "reference": "****1234",
+        "status": "succeeded"
+      }
+    ],
+    "amount_paid_minor": 23650,
+    "balance_minor": 0
   },
-  "current": { "status": "completed", "payment_status": "paid", "amount_paid_minor": 23650, "amount_refunded_minor": 0, "balance_minor": 0 },
+  "current": {
+    "status": "completed",
+    "payment_status": "paid",
+    "amount_paid_minor": 23650,
+    "amount_refunded_minor": 0,
+    "balance_minor": 0
+  },
   "print_count": 1
 }
 ```
@@ -899,12 +1236,21 @@ Reprints are audited.
 
 ```json
 {
-  "id": "0192...", "sale_id": "0192...", "payment_method_id": "0192...",
-  "method": "cash", "method_name": "Cash",
-  "amount_minor": 5000, "tendered_amount_minor": 10000, "change_amount_minor": 5000,
-  "refunded_amount_minor": 0, "currency": "NGN", "status": "succeeded",
-  "reference": null, "status_reason": null,
-  "created_at": "...", "processed_at": "..."
+  "id": "0192...",
+  "sale_id": "0192...",
+  "payment_method_id": "0192...",
+  "method": "cash",
+  "method_name": "Cash",
+  "amount_minor": 5000,
+  "tendered_amount_minor": 10000,
+  "change_amount_minor": 5000,
+  "refunded_amount_minor": 0,
+  "currency": "NGN",
+  "status": "succeeded",
+  "reference": null,
+  "status_reason": null,
+  "created_at": "...",
+  "processed_at": "..."
 }
 ```
 
@@ -976,21 +1322,45 @@ card terminal reconciled separately:
 
 ```json
 {
-  "id": "0192...", "store_id": "0192...", "sale_id": "0192...",
-  "return_number": "R-IKJ-00000003", "status": "completed",
-  "reason_code": "faulty", "notes": null,
-  "refund_method": "original", "refund_payment_method_id": null,
-  "outside_window": false, "refund_total_minor": 100000,
-  "requested_by_user_id": "0192...", "approved_by_user_id": null, "approved_at": null,
-  "rejected_by_user_id": null, "rejection_reason": null,
-  "completed_at": "...", "device_id": "till-1", "created_at": "...",
-  "lines": [{
-    "id": "...", "return_id": "...", "sale_line_id": "...", "product_id": "...",
-    "product_name": "Kettle", "stock_item_id": null, "unit_id": "...", "unit_name": "Each",
-    "quantity": "1", "base_quantity": "1", "condition": "resellable", "restock": true,
-    "refund_amount_minor": 100000, "tax_refund_minor": 0, "stock_movement_id": "..."
-  }],
-  "refunds": [ "...refunds, below..." ]
+  "id": "0192...",
+  "store_id": "0192...",
+  "sale_id": "0192...",
+  "return_number": "R-IKJ-00000003",
+  "status": "completed",
+  "reason_code": "faulty",
+  "notes": null,
+  "refund_method": "original",
+  "refund_payment_method_id": null,
+  "outside_window": false,
+  "refund_total_minor": 100000,
+  "requested_by_user_id": "0192...",
+  "approved_by_user_id": null,
+  "approved_at": null,
+  "rejected_by_user_id": null,
+  "rejection_reason": null,
+  "completed_at": "...",
+  "device_id": "till-1",
+  "created_at": "...",
+  "lines": [
+    {
+      "id": "...",
+      "return_id": "...",
+      "sale_line_id": "...",
+      "product_id": "...",
+      "product_name": "Kettle",
+      "stock_item_id": null,
+      "unit_id": "...",
+      "unit_name": "Each",
+      "quantity": "1",
+      "base_quantity": "1",
+      "condition": "resellable",
+      "restock": true,
+      "refund_amount_minor": 100000,
+      "tax_refund_minor": 0,
+      "stock_movement_id": "..."
+    }
+  ],
+  "refunds": ["...refunds, below..."]
 }
 ```
 
@@ -1009,11 +1379,13 @@ Permission `sale.return` at the sale's store.
 
 ```json
 {
-  "id": "0192...",                       // client-generated, the idempotency key
+  "id": "0192...", // client-generated, the idempotency key
   "device_id": "till-1",
   "reason_code": "faulty",
   "notes": "Does not heat",
-  "lines": [ { "sale_line_id": "0192...", "quantity": "1", "condition": "resellable" } ],
+  "lines": [
+    { "sale_line_id": "0192...", "quantity": "1", "condition": "resellable" }
+  ],
   "refund": { "method": "original" }
 }
 ```
@@ -1086,12 +1458,20 @@ tenant-wide grants don't need it.
 
 ```json
 {
-  "id": "0192...", "full_name": "Ada Obi",
-  "phone": "0803******567", "email": "a***@example.com",
-  "address": "***", "notes": null, "tax_identification_number": null,
-  "customer_group_id": null, "store_credit_amount_minor": 100000,
-  "marketing_consent": true, "home_store_id": "0192...",
-  "created_at": "...", "updated_at": "...", "contact_masked": true
+  "id": "0192...",
+  "full_name": "Ada Obi",
+  "phone": "0803******567",
+  "email": "a***@example.com",
+  "address": "***",
+  "notes": null,
+  "tax_identification_number": null,
+  "customer_group_id": null,
+  "store_credit_amount_minor": 100000,
+  "marketing_consent": true,
+  "home_store_id": "0192...",
+  "created_at": "...",
+  "updated_at": "...",
+  "contact_masked": true
 }
 ```
 
@@ -1122,9 +1502,16 @@ Permission `customer.view`. `404` once erased.
 Permission `customer.manage` (cashiers hold it).
 
 ```json
-{ "full_name": "Ada Obi", "phone": "0803 123 4567", "email": "ada@example.com",
-  "address": "12 Allen Ave", "notes": null, "tax_identification_number": null,
-  "customer_group_id": null, "marketing_consent": true }
+{
+  "full_name": "Ada Obi",
+  "phone": "0803 123 4567",
+  "email": "ada@example.com",
+  "address": "12 Allen Ave",
+  "notes": null,
+  "tax_identification_number": null,
+  "customer_group_id": null,
+  "marketing_consent": true
+}
 ```
 
 Only `full_name` is required; a walk-in sale needs no customer at all.
@@ -1149,10 +1536,22 @@ purchase history, newest first, from the stores where the caller holds
 `customer.history` only:
 
 ```json
-{ "items": [{ "sale_id": "...", "receipt_number": "IKJ-00000042", "store_id": "...",
-              "store_name": "Ikeja", "status": "completed", "payment_status": "paid",
-              "total_amount_minor": 1000, "amount_refunded_minor": 0, "created_at": "..." }],
-  "next_cursor": null }
+{
+  "items": [
+    {
+      "sale_id": "...",
+      "receipt_number": "IKJ-00000042",
+      "store_id": "...",
+      "store_name": "Ikeja",
+      "status": "completed",
+      "payment_status": "paid",
+      "total_amount_minor": 1000,
+      "amount_refunded_minor": 0,
+      "created_at": "..."
+    }
+  ],
+  "next_cursor": null
+}
 ```
 
 ---
@@ -1170,15 +1569,32 @@ so a mismatch can't cancel itself out:
 
 ```json
 {
-  "store_id": "...", "shift_id": null, "from": null, "to": null,
-  "by_method": [{
-    "payment_method_id": "...", "name": "Cash", "kind": "cash", "count": 3,
-    "collected_minor": 6500, "refunded_minor": 0, "reversed_minor": 0,
-    "pending_minor": 0, "failed_minor": 0, "net_minor": 6500
-  }],
+  "store_id": "...",
+  "shift_id": null,
+  "from": null,
+  "to": null,
+  "by_method": [
+    {
+      "payment_method_id": "...",
+      "name": "Cash",
+      "kind": "cash",
+      "count": 3,
+      "collected_minor": 6500,
+      "refunded_minor": 0,
+      "reversed_minor": 0,
+      "pending_minor": 0,
+      "failed_minor": 0,
+      "net_minor": 6500
+    }
+  ],
   "sales": {
-    "completed_count": 2, "awaiting_payment_count": 0, "voided_count": 0,
-    "due_minor": 10000, "amount_paid_minor": 10000, "outstanding_minor": 0, "refunded_minor": 0
+    "completed_count": 2,
+    "awaiting_payment_count": 0,
+    "voided_count": 0,
+    "due_minor": 10000,
+    "amount_paid_minor": 10000,
+    "outstanding_minor": 0,
+    "refunded_minor": 0
   },
   "non_payment_refunds_minor": 0,
   "payments_net_minor": 10000,
@@ -1197,51 +1613,51 @@ so a mismatch can't cancel itself out:
 
 ## 17. Error codes
 
-| Code                          | Status | Meaning / what the client should do                                                    |
-| ----------------------------- | ------ | -------------------------------------------------------------------------------------- |
-| `EMAIL_ALREADY_REGISTERED`    | 400    | Signup with an email in use. Offer login.                                               |
-| `EMAIL_NOT_VERIFIED`          | 400    | Login before verifying. Offer the OTP step.                                             |
-| `TENANT_REQUIRED`             | 409    | User belongs to several tenants; pick one from `data.tenants` and log in again.         |
-| `PLATFORM_TENANT_REQUIRED`    | 409    | Same, for platform staff.                                                               |
-| `ROLE_NOT_FOUND`              | 409    | The account has no active role in any tenant.                                           |
-| `SHIFT_ALREADY_OPEN`          | 409    | The store already has an open shift.                                                    |
-| `SHIFT_NOT_OPEN`              | 409/400| The shift is closed (409) or belongs to another store (400).                            |
-| `STORE_INACTIVE`              | 400/409| The store is deactivated (400 at checkout, 409 for transfers).                          |
-| `PRODUCT_NOT_SOLD_HERE`       | 400    | Unknown, inactive, or not listed at this store.                                         |
-| `PRODUCT_NOT_PRICED`          | 409    | No price rule applies; add one or override the price.                                   |
-| `INVALID_UNIT`                | 400    | The unit isn't one of the product's units.                                              |
-| `STOCK_ITEM_REQUIRED`         | 400    | Batch- or serial-tracked product without a valid `stock_item_id`.                       |
-| `PRODUCT_OUT_OF_STOCK`        | 409    | Not enough on hand (message has requested and available).                               |
-| `PRICE_OVERRIDE_FORBIDDEN`    | 403    | Override without `sale.price_override`, or without a reason.                            |
-| `DISCOUNT_FORBIDDEN`          | 403    | Discount above the cashier limit without `sale.discount`.                               |
-| `TOTAL_MISMATCH`              | 409    | The till's total is stale; re-quote and show the new total.                             |
-| `IDEMPOTENCY_CONFLICT`        | 409    | A different request already used this id; generate a new id.                            |
-| `PAYMENT_INSUFFICIENT`        | 400    | Payments don't cover the amount due.                                                    |
-| `PAYMENT_OVERPAID`            | 400    | Payments exceed what's due; record cash change as tendered.                             |
-| `PAYMENT_REFERENCE_REQUIRED`  | 400    | This method needs a transaction reference.                                              |
-| `PAYMENT_METHOD_INVALID`      | 400    | Unknown or inactive method, or one that can't be used here (store credit at checkout).  |
-| `PAYMENT_METHOD_EXISTS`       | 409    | Payment method code already in use.                                                     |
-| `DUPLICATE_PAYMENT_REFERENCE` | 409    | That reference is already on a live payment of this method.                             |
-| `INVALID_PAYMENT_TRANSITION`  | 409    | The payment can't move to that status from where it is.                                 |
-| `SALE_NOT_COMPLETED`          | 409    | Returns and later payments need a completed (or awaiting-payment) sale.                 |
-| `SALE_NOT_VOIDABLE`           | 409    | Shift closed, or goods already returned/refunded; use a return.                         |
-| `RETURN_QUANTITY_EXCEEDED`    | 409    | More than is left to return on that line (message says how many).                       |
-| `ITEM_NOT_RETURNABLE`         | 400    | The product is marked non-returnable.                                                   |
-| `REFUND_AMOUNT_EXCEEDED`      | 409    | More than was paid and not yet refunded, on the sale or the payment.                    |
-| `RETURN_NOT_PENDING`          | 409    | The return isn't waiting for approval.                                                  |
-| `APPROVAL_SELF_FORBIDDEN`     | 403    | The person who started a return can't approve it.                                       |
-| `CUSTOMER_REQUIRED`           | 400    | Store credit needs a customer on the sale.                                              |
-| `CUSTOMER_PHONE_EXISTS`       | 409    | A customer with this phone already exists; look them up.                                |
-| `BARCODE_EXISTS`              | 409    | The barcode is already assigned to a product.                                           |
-| `ALREADY_EXISTS`              | 409    | A record with these details exists (duplicate slug, SKU, unit, group or sale unit).     |
-| `GROUP_IN_USE`                | 409    | The customer group still has customers or price rules.                                  |
-| `SHIFT_OPEN`                  | 409    | Close the store's open shift before deactivating the store.                             |
-| `PRODUCT_INACTIVE`            | 409    | The product is deactivated (transfers). Adjustments are still allowed.                  |
-| `VALIDATION_FAILED`           | 400    | A field is missing, blank, too long, malformed or out of range; the message names it.   |
-| `INVALID_REFERENCE`           | 400    | A referenced record does not exist.                                                     |
-| `INVALID_VALUE`               | 400    | A value is outside what the database allows.                                            |
+| Code                          | Status      | Meaning / what the client should do                                                                   |
+| ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| `EMAIL_ALREADY_REGISTERED`    | 400         | Signup with an email in use. Offer login.                                                             |
+| `EMAIL_NOT_VERIFIED`          | 400         | Login before verifying. Offer the OTP step.                                                           |
+| `TENANT_REQUIRED`             | 409         | User belongs to several tenants; pick one from `data.tenants` and log in again.                       |
+| `PLATFORM_TENANT_REQUIRED`    | 409         | Same, for platform staff.                                                                             |
+| `ROLE_NOT_FOUND`              | 409         | The account has no active role in any tenant.                                                         |
+| `SHIFT_ALREADY_OPEN`          | 409         | The store already has an open shift.                                                                  |
+| `SHIFT_NOT_OPEN`              | 409/400     | The shift is closed (409) or belongs to another store (400).                                          |
+| `STORE_INACTIVE`              | 400/409     | The store is deactivated (400 at checkout, 409 for transfers).                                        |
+| `PRODUCT_NOT_SOLD_HERE`       | 400         | Unknown, inactive, or not listed at this store.                                                       |
+| `PRODUCT_NOT_PRICED`          | 409         | No price rule applies; add one or override the price.                                                 |
+| `INVALID_UNIT`                | 400         | The unit isn't one of the product's units.                                                            |
+| `STOCK_ITEM_REQUIRED`         | 400         | Batch- or serial-tracked product without a valid `stock_item_id`.                                     |
+| `PRODUCT_OUT_OF_STOCK`        | 409         | Not enough on hand (message has requested and available).                                             |
+| `PRICE_OVERRIDE_FORBIDDEN`    | 403         | Override without `sale.price_override`, or without a reason.                                          |
+| `DISCOUNT_FORBIDDEN`          | 403         | Discount above the cashier limit without `sale.discount`.                                             |
+| `TOTAL_MISMATCH`              | 409         | The till's total is stale; re-quote and show the new total.                                           |
+| `IDEMPOTENCY_CONFLICT`        | 409         | A different request already used this id; generate a new id.                                          |
+| `PAYMENT_INSUFFICIENT`        | 400         | Payments don't cover the amount due.                                                                  |
+| `PAYMENT_OVERPAID`            | 400         | Payments exceed what's due; record cash change as tendered.                                           |
+| `PAYMENT_REFERENCE_REQUIRED`  | 400         | This method needs a transaction reference.                                                            |
+| `PAYMENT_METHOD_INVALID`      | 400         | Unknown or inactive method, or one that can't be used here (store credit at checkout).                |
+| `PAYMENT_METHOD_EXISTS`       | 409         | Payment method code already in use.                                                                   |
+| `DUPLICATE_PAYMENT_REFERENCE` | 409         | That reference is already on a live payment of this method.                                           |
+| `INVALID_PAYMENT_TRANSITION`  | 409         | The payment can't move to that status from where it is.                                               |
+| `SALE_NOT_COMPLETED`          | 409         | Returns and later payments need a completed (or awaiting-payment) sale.                               |
+| `SALE_NOT_VOIDABLE`           | 409         | Shift closed, or goods already returned/refunded; use a return.                                       |
+| `RETURN_QUANTITY_EXCEEDED`    | 409         | More than is left to return on that line (message says how many).                                     |
+| `ITEM_NOT_RETURNABLE`         | 400         | The product is marked non-returnable.                                                                 |
+| `REFUND_AMOUNT_EXCEEDED`      | 409         | More than was paid and not yet refunded, on the sale or the payment.                                  |
+| `RETURN_NOT_PENDING`          | 409         | The return isn't waiting for approval.                                                                |
+| `APPROVAL_SELF_FORBIDDEN`     | 403         | The person who started a return can't approve it.                                                     |
+| `CUSTOMER_REQUIRED`           | 400         | Store credit needs a customer on the sale.                                                            |
+| `CUSTOMER_PHONE_EXISTS`       | 409         | A customer with this phone already exists; look them up.                                              |
+| `BARCODE_EXISTS`              | 409         | The barcode is already assigned to a product.                                                         |
+| `ALREADY_EXISTS`              | 409         | A record with these details exists (duplicate slug, SKU, unit, group or sale unit).                   |
+| `GROUP_IN_USE`                | 409         | The customer group still has customers or price rules.                                                |
+| `SHIFT_OPEN`                  | 409         | Close the store's open shift before deactivating the store.                                           |
+| `PRODUCT_INACTIVE`            | 409         | The product is deactivated (transfers). Adjustments are still allowed.                                |
+| `VALIDATION_FAILED`           | 400         | A field is missing, blank, too long, malformed or out of range; the message names it.                 |
+| `INVALID_REFERENCE`           | 400         | A referenced record does not exist.                                                                   |
+| `INVALID_VALUE`               | 400         | A value is outside what the database allows.                                                          |
 | `INVALID_REQUEST`             | 400/415/422 | The body, path or query could not be read (bad JSON, wrong shape, wrong content type, unknown field). |
-| `ROUTE_NOT_FOUND`             | 404    | No such endpoint.                                                                       |
-| `METHOD_NOT_ALLOWED`          | 405    | The endpoint exists but not for this HTTP method.                                       |
+| `ROUTE_NOT_FOUND`             | 404         | No such endpoint.                                                                                     |
+| `METHOD_NOT_ALLOWED`          | 405         | The endpoint exists but not for this HTTP method.                                                     |
 
 `403` responses without a code carry `Missing permission: <name>`.

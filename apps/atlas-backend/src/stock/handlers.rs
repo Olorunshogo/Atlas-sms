@@ -9,7 +9,10 @@ use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
 use crate::roles;
 
-use super::models::{AdjustStockRequest, MovementRecord, ProductInventory, StockLevel, StockMovement, TransferStockRequest};
+use super::models::{
+    AdjustStockRequest, MovementRecord, ProductInventory, RequestTransferRequest, StockLevel,
+    StockMovement, StockTransfer,
+};
 use super::service;
 
 #[derive(Deserialize)]
@@ -73,68 +76,124 @@ pub async fn adjust_stock(
     return Ok(Json(ApiEnvelope::ok("Stock adjusted.", movement)));
 }
 
-#[derive(serde::Serialize)]
-pub struct TransferResponse {
-    pub out_movement: StockMovement,
-    pub in_movement: StockMovement,
+// === Inter-store transfers (FR-22)
+//
+// Staged: request -> approve/reject -> dispatch -> receive, with cancel as
+// an exit before dispatch. See `service.rs`'s module doc for why the stages
+// exist - stock must never be countable as available at both stores at once.
+
+async fn audit_transfer(tx: &mut TenantTx, transfer: &StockTransfer, action: &str) -> Result<(), ApiError> {
+    let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    return audit::record(
+        tx,
+        tenant_id,
+        user_id,
+        "stock_transfer",
+        transfer.id,
+        action,
+        serde_json::to_value(transfer).ok(),
+    )
+    .await;
 }
 
 /**
  * `POST /api/v1/stock/transfers`.
- * Requires `stock.transfer` at BOTH the source and destination store - moving stock into a branch is as much a receiving-store decision as a sending-store one.
+ * Requires `stock.transfer` at the sending store - the destination store confirms at `approve`, not here.
  */
-pub async fn transfer_stock(
+pub async fn request_transfer(
     mut tx: TenantTx,
-    Json(body): Json<TransferStockRequest>,
-) -> Result<Json<ApiEnvelope<TransferResponse>>, ApiError> {
+    Json(body): Json<RequestTransferRequest>,
+) -> Result<Json<ApiEnvelope<StockTransfer>>, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
-    roles::service::assert_permission(
-        &mut tx,
-        user_id,
-        tenant_id,
-        Some(body.from_store_id),
-        "stock.transfer",
-    )
-    .await?;
-    roles::service::assert_permission(
-        &mut tx,
-        user_id,
-        tenant_id,
-        Some(body.to_store_id),
-        "stock.transfer",
-    )
-    .await?;
-    let (out_movement, in_movement) =
-        service::transfer_stock(&mut tx, tenant_id, user_id, &body).await?;
-    audit::record(
-        &mut tx,
-        tenant_id,
-        user_id,
-        "stock_movement",
-        out_movement.id,
-        "stock.transfer_out",
-        serde_json::to_value(&out_movement).ok(),
-    )
-    .await?;
-    audit::record(
-        &mut tx,
-        tenant_id,
-        user_id,
-        "stock_movement",
-        in_movement.id,
-        "stock.transfer_in",
-        serde_json::to_value(&in_movement).ok(),
-    )
-    .await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(body.from_store_id), "stock.transfer").await?;
+    let transfer = service::request_transfer(&mut tx, tenant_id, user_id, &body).await?;
+    audit_transfer(&mut tx, &transfer, "stock_transfer.request").await?;
     tx.commit().await?;
-    return Ok(Json(ApiEnvelope::ok(
-        "Stock transferred.",
-        TransferResponse {
-            out_movement,
-            in_movement,
-        },
-    )));
+    return Ok(Json(ApiEnvelope::ok("Transfer requested.", transfer)));
+}
+
+/// `GET /api/v1/stock/transfers?store_id=`. Every transfer touching that store, either direction, newest first.
+pub async fn list_transfers(
+    mut tx: TenantTx,
+    Query(query): Query<OnHandQuery>,
+) -> Result<Json<ApiEnvelope<Vec<StockTransfer>>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(query.store_id), "stock.view").await?;
+    let transfers = service::list_transfers(&mut tx, query.store_id).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Transfers fetched.", transfers)));
+}
+
+/**
+ * `POST /api/v1/stock/transfers/:id/approve`.
+ * Requires `stock.transfer` at BOTH stores - moving stock into a branch is as much a receiving-store decision as a sending-store one.
+ */
+pub async fn approve_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<StockTransfer>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let existing = service::get_transfer(&mut tx, transfer_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.from_store_id), "stock.transfer").await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
+    let transfer = service::approve_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
+    audit_transfer(&mut tx, &transfer, "stock_transfer.approve").await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Transfer approved.", transfer)));
+}
+
+/// `POST /api/v1/stock/transfers/:id/reject`. Requires `stock.transfer` at either store.
+pub async fn reject_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<StockTransfer>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let existing = service::get_transfer(&mut tx, transfer_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
+    let transfer = service::reject_transfer(&mut tx, tenant_id, transfer_id).await?;
+    audit_transfer(&mut tx, &transfer, "stock_transfer.reject").await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Transfer rejected.", transfer)));
+}
+
+/// `POST /api/v1/stock/transfers/:id/cancel`. Requires `stock.transfer` at the sending store - not available once dispatched.
+pub async fn cancel_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<StockTransfer>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let existing = service::get_transfer(&mut tx, transfer_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.from_store_id), "stock.transfer").await?;
+    let transfer = service::cancel_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
+    audit_transfer(&mut tx, &transfer, "stock_transfer.cancel").await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Transfer cancelled.", transfer)));
+}
+
+/**
+ * `POST /api/v1/stock/transfers/:id/dispatch`.
+ * Requires `stock.transfer` at the sending store. Stock actually leaves here - see `service::dispatch_transfer`.
+ */
+pub async fn dispatch_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<StockTransfer>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let existing = service::get_transfer(&mut tx, transfer_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.from_store_id), "stock.transfer").await?;
+    let transfer = service::dispatch_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
+    audit_transfer(&mut tx, &transfer, "stock_transfer.dispatch").await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Transfer dispatched.", transfer)));
+}
+
+/**
+ * `POST /api/v1/stock/transfers/:id/receive`.
+ * Requires `stock.transfer` at the receiving store. Stock actually arrives here - see `service::receive_transfer`.
+ */
+pub async fn receive_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -> Result<Json<ApiEnvelope<StockTransfer>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    let existing = service::get_transfer(&mut tx, transfer_id).await?;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
+    let transfer = service::receive_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
+    audit_transfer(&mut tx, &transfer, "stock_transfer.receive").await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Transfer received.", transfer)));
 }
 
 // === Cross-store reads

@@ -1,8 +1,5 @@
-// === Currency
-export * from './format-currency';
-
-// === Time
-export * from './format-relative-time';
-
-// === Product sorting
-export * from './sort-products';
+/*
+ * All cleared - ported from the Debridgers reference source, not this
+ * domain. Files stay as placeholders for Atlas's own shared utils.
+ * See docs/atlas/CONTEXT.md.
+ */

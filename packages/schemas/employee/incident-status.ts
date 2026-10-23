@@ -1,18 +1,6 @@
-import { z } from 'zod';
-
-export const incidentStatusOptions = [
-  { value: 'reported', label: 'Reported' },
-  { value: 'under_investigation', label: 'Under investigation' },
-  { value: 'resolved', label: 'Resolved' },
-  { value: 'closed', label: 'Closed' },
-] as const;
-
-/* Mirrors updateIncident status + corrective_actions on the backend. */
-export const incidentStatusSchema = z.object({
-  status: z.enum(['reported', 'under_investigation', 'resolved', 'closed'], {
-    message: 'Select a status',
-  }),
-  correctiveActions: z.string(),
-});
-
-export type IncidentStatusValues = z.infer<typeof incidentStatusSchema>;
+/*
+ * Cleared. Was a direct port from the Debridgers reference source
+ * (~/Projects/React/Debridgers) - not wired into Atlas and not this
+ * domain. Kept as a placeholder for this file to be rebuilt with Atlas's
+ * own content later. See docs/atlas/CONTEXT.md.
+ */

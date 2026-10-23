@@ -298,6 +298,186 @@ async fn a_purchase_order_moves_from_draft_to_partially_received_to_received(poo
     assert_eq!(supplier["balance_amount_minor"], 5000);
 }
 
+#[sqlx::test]
+async fn a_draft_order_can_be_edited_and_submitted_but_not_edited_after(pool: PgPool) {
+    let router = build_router(pool.clone());
+    let (token, tenant_id) = signup_verify_and_login(&router, &pool, "po-lifecycle-owner@example.com").await;
+    let store_id = create_store(&router, &token).await;
+    let unit_id = seed_unit(&pool, &tenant_id).await;
+    let product_id = create_product(&router, &token, unit_id).await;
+    let (_, supplier_body) = post(&router, "/api/v1/suppliers", Some(&token), json!({ "name": "Acme", "phone": null, "email": null })).await;
+    let supplier_id = supplier_body["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, po_body) = post(
+        &router,
+        "/api/v1/purchase-orders",
+        Some(&token),
+        json!({
+            "store_id": store_id,
+            "supplier_id": supplier_id,
+            "lines": [{ "product_id": product_id, "quantity_ordered": "10", "unit_cost_amount_minor": 500 }],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let purchase_order_id = po_body["data"]["id"].as_str().unwrap().to_string();
+
+    // Edit before approval - replace the lines wholesale.
+    let (status, edit_body) = patch(
+        &router,
+        &format!("/api/v1/purchase-orders/{}", purchase_order_id),
+        &token,
+        json!({ "supplier_id": null, "lines": [{ "product_id": product_id, "quantity_ordered": "20", "unit_cost_amount_minor": 450 }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(edit_body["data"]["status"], "draft");
+    let (_, lines_body) = get(&router, &format!("/api/v1/purchase-orders/{}/lines", purchase_order_id), &token).await;
+    let lines = lines_body["data"].as_array().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["quantity_ordered"], "20");
+
+    let (status, submit_body) = post(&router, &format!("/api/v1/purchase-orders/{}/submit", purchase_order_id), Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(submit_body["data"]["status"], "ordered");
+
+    // Can't edit or re-submit once ordered.
+    let (status, error_body) = patch(
+        &router,
+        &format!("/api/v1/purchase-orders/{}", purchase_order_id),
+        &token,
+        json!({ "supplier_id": null, "lines": null }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_body["code"], "PURCHASE_ORDER_NOT_DRAFT");
+    let (status, error_body) = post(&router, &format!("/api/v1/purchase-orders/{}/submit", purchase_order_id), Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_body["code"], "PURCHASE_ORDER_NOT_DRAFT");
+}
+
+#[sqlx::test]
+async fn an_ordered_po_can_be_cancelled_but_a_received_one_cannot(pool: PgPool) {
+    let router = build_router(pool.clone());
+    let (token, tenant_id) = signup_verify_and_login(&router, &pool, "po-cancel-owner@example.com").await;
+    let store_id = create_store(&router, &token).await;
+    let unit_id = seed_unit(&pool, &tenant_id).await;
+    let product_id = create_product(&router, &token, unit_id).await;
+    let (_, supplier_body) = post(&router, "/api/v1/suppliers", Some(&token), json!({ "name": "Acme", "phone": null, "email": null })).await;
+    let supplier_id = supplier_body["data"]["id"].as_str().unwrap().to_string();
+
+    let (_, po_body) = post(
+        &router,
+        "/api/v1/purchase-orders",
+        Some(&token),
+        json!({ "store_id": store_id, "supplier_id": supplier_id, "lines": [{ "product_id": product_id, "quantity_ordered": "10", "unit_cost_amount_minor": 500 }] }),
+    )
+    .await;
+    let cancellable_id = po_body["data"]["id"].as_str().unwrap().to_string();
+    post(&router, &format!("/api/v1/purchase-orders/{}/submit", cancellable_id), Some(&token), json!({})).await;
+    let (status, cancel_body) = post(&router, &format!("/api/v1/purchase-orders/{}/cancel", cancellable_id), Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cancel_body["data"]["status"], "cancelled");
+
+    let (_, po_body) = post(
+        &router,
+        "/api/v1/purchase-orders",
+        Some(&token),
+        json!({ "store_id": store_id, "supplier_id": supplier_id, "lines": [{ "product_id": product_id, "quantity_ordered": "10", "unit_cost_amount_minor": 500 }] }),
+    )
+    .await;
+    let received_id = po_body["data"]["id"].as_str().unwrap().to_string();
+    let (_, lines_body) = get(&router, &format!("/api/v1/purchase-orders/{}/lines", received_id), &token).await;
+    let line_id = lines_body["data"].as_array().unwrap()[0]["id"].as_str().unwrap().to_string();
+    post(
+        &router,
+        &format!("/api/v1/purchase-orders/{}/receive", received_id),
+        Some(&token),
+        json!({ "lines": [{ "purchase_order_line_id": line_id, "quantity_received": "10" }] }),
+    )
+    .await;
+    let (status, error_body) = post(&router, &format!("/api/v1/purchase-orders/{}/cancel", received_id), Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_body["code"], "PURCHASE_ORDER_NOT_CANCELLABLE");
+}
+
+#[sqlx::test]
+async fn a_purchase_return_reduces_stock_and_supplier_balance_but_not_past_what_was_received(pool: PgPool) {
+    let router = build_router(pool.clone());
+    let (token, tenant_id) = signup_verify_and_login(&router, &pool, "po-return-owner@example.com").await;
+    let store_id = create_store(&router, &token).await;
+    let unit_id = seed_unit(&pool, &tenant_id).await;
+    let product_id = create_product(&router, &token, unit_id).await;
+    let (_, supplier_body) = post(&router, "/api/v1/suppliers", Some(&token), json!({ "name": "Acme", "phone": null, "email": null })).await;
+    let supplier_id = supplier_body["data"]["id"].as_str().unwrap().to_string();
+
+    let (_, po_body) = post(
+        &router,
+        "/api/v1/purchase-orders",
+        Some(&token),
+        json!({ "store_id": store_id, "supplier_id": supplier_id, "lines": [{ "product_id": product_id, "quantity_ordered": "10", "unit_cost_amount_minor": 500 }] }),
+    )
+    .await;
+    let purchase_order_id = po_body["data"]["id"].as_str().unwrap().to_string();
+    let (_, lines_body) = get(&router, &format!("/api/v1/purchase-orders/{}/lines", purchase_order_id), &token).await;
+    let line_id = lines_body["data"].as_array().unwrap()[0]["id"].as_str().unwrap().to_string();
+    let (_, receive_body) = post(
+        &router,
+        &format!("/api/v1/purchase-orders/{}/receive", purchase_order_id),
+        Some(&token),
+        json!({ "lines": [{ "purchase_order_line_id": line_id, "quantity_received": "10" }] }),
+    )
+    .await;
+    assert_eq!(receive_body["data"]["purchase_order"]["status"], "received");
+
+    // The GRN line id, not the order line id, is what a return references.
+    let grn_line_id: String = sqlx::query_scalar("SELECT id::text FROM atlas.goods_received_note_lines WHERE purchase_order_line_id = $1::uuid")
+        .bind(&line_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Returning more than was received is rejected.
+    let (status, error_body) = post(
+        &router,
+        "/api/v1/purchase-returns",
+        Some(&token),
+        json!({ "purchase_order_id": purchase_order_id, "reason": "Damaged", "lines": [{ "goods_received_note_line_id": grn_line_id, "quantity": "11" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_body["code"], "RETURN_QUANTITY_EXCEEDED");
+
+    let (status, return_body) = post(
+        &router,
+        "/api/v1/purchase-returns",
+        Some(&token),
+        json!({ "purchase_order_id": purchase_order_id, "reason": "Damaged", "lines": [{ "goods_received_note_line_id": grn_line_id, "quantity": "3" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(return_body["data"]["lines"][0]["quantity"], "3");
+
+    let (_, stock_body) = get(&router, &format!("/api/v1/stock/on-hand?store_id={}", store_id), &token).await;
+    assert_eq!(stock_body["data"][0]["on_hand"], "7");
+
+    let (_, suppliers_body) = get(&router, "/api/v1/suppliers", &token).await;
+    let supplier = suppliers_body["data"].as_array().unwrap().iter().find(|s| s["id"] == supplier_id).unwrap();
+    // 10 received * 500 = 5000, minus 3 returned * 500 = 1500 -> 3500.
+    assert_eq!(supplier["balance_amount_minor"], 3500);
+
+    // The remaining eligible amount (7) can't be exceeded either.
+    let (status, error_body) = post(
+        &router,
+        "/api/v1/purchase-returns",
+        Some(&token),
+        json!({ "purchase_order_id": purchase_order_id, "reason": "More damage", "lines": [{ "goods_received_note_line_id": grn_line_id, "quantity": "8" }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_body["code"], "RETURN_QUANTITY_EXCEEDED");
+}
+
 // === Payments
 
 #[sqlx::test]
