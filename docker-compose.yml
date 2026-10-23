@@ -43,10 +43,10 @@ services:
     # `environment` wins over `env_file`, which is the point: .env holds the
     # host-side addresses used by `nx dev`, and these override them with the
     # compose-network ones. Switching between the two modes needs no edit
-    # to .env. Still klassivox_api, never the superuser, or RLS is bypassed.
+    # to .env. Still atlas_api, never the superuser, or RLS is bypassed.
     environment:
       - PORT=5754
-      - DATABASE_URL=postgres://klassivox_api:klassivox_api_dev@postgres:5432/atlas
+      - DATABASE_URL=postgres://atlas_api:atlas_api_dev@postgres:5432/atlas
       - DATABASE_ADMIN_URL=postgres://atlas:atlas@postgres:5432/atlas
       - REDIS_URL=redis://redis:6379
     depends_on:

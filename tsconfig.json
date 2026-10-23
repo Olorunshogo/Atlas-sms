@@ -4,13 +4,16 @@
   "files": [],
   "references": [
     {
-      "path": "./apps/landing-page"
-    },
-    {
-      "path": "./apps/atlas-web"
-    },
-    {
       "path": "./libs/shared/theme"
+    },
+    {
+      "path": "./libs/shared/composables"
+    },
+    {
+      "path": "./libs/shared/validation"
+    },
+    {
+      "path": "./packages/atlas-ui/core"
     },
     {
       "path": "./packages/atlas-ui/app"

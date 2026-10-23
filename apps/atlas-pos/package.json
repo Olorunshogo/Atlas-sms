@@ -10,6 +10,9 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@atlas/api": "workspace:*",
+    "@atlas/ui": "workspace:*",
+    "@atlas/utils": "workspace:*",
     "@atlas/ui-app": "workspace:*",
     "@capacitor/core": "^7.0.0",
     "@ionic/vue": "^8.4.0",
@@ -32,6 +35,9 @@
     "vue-tsc": "3.3.6"
   },
   "nx": {
-    "tags": ["type:app", "scope:atlas-pos"]
+    "tags": [
+      "type:app",
+      "scope:atlas-pos"
+    ]
   }
 }

@@ -12,31 +12,23 @@ use crate::state::AppState;
 // === TenantTx
 
 /**
- * The row-level-security enforcement mechanism. Every tenant-scoped handler
- * takes a `TenantTx` instead of a raw pool connection, so it is
- * structurally impossible to write an unscoped query - there is no other
- * way to get a connection out of this extractor.
+ * The row-level-security enforcement mechanism.
+ * Every tenant-scoped handler takes a `TenantTx` instead of a raw pool connection, so it is structurally impossible to write an unscoped query - there is no other way to get a connection out of this extractor.
  *
- * `user_id` and `tenant_id` come from a verified access-token JWT
- * (`Authorization: Bearer <token>`, decoded via `auth::decode_access_token`,
- * see `auth::jwt::Claims`), never a client-supplied header. A header is
- * something a caller can set to any value; a signed claim isn't.
+ * `user_id` and `tenant_id` come from a verified access-token JWT (`Authorization: Bearer <token>`, decoded via `auth::decode_access_token`, see `auth::jwt::Claims`), never a client-supplied header.
+ * A header is something a caller can set to any value; a signed claim isn't.
  *
- * `store_id` is the one piece that legitimately comes from a plain header
- * (`x-store-id`, optional): it's the caller picking which store's data to
- * view, not an identity claim. A role grant scoped to a different store
- * still gets rejected downstream, by `roles::service::assert_permission`
- * or by RLS itself.
+ * `store_id` is the one piece that legitimately comes from a plain header (`x-store-id`, optional): it's the caller picking which store's data to view, not an identity claim.
+ * A role grant scoped to a different store still gets rejected downstream, by `roles::service::assert_permission` or by RLS itself.
  */
 pub struct TenantTx {
     tx: Transaction<'static, Postgres>,
     pub user_id: Uuid,
     pub tenant_id: Uuid,
-    // Not read by any handler yet - every current mutation takes its store
-    // id from the request body instead (see stock::handlers, sales::handlers).
-    // Kept for a future "default store view" GET endpoint that trusts the
-    // header rather than a query param.
-    #[allow(dead_code)]
+    /**
+     * Mutations still take their store from the body or the entity they touch.
+     * Tenant-level resources with no store of their own (customers) check permissions against this, so a store-scoped grant can match.
+     */
     pub store_id: Option<Uuid>,
 }
 
@@ -44,25 +36,23 @@ impl Deref for TenantTx {
     type Target = PgConnection;
 
     fn deref(&self) -> &Self::Target {
-        &self.tx
+        return &self.tx;
     }
 }
 
 impl DerefMut for TenantTx {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tx
+        return &mut self.tx;
     }
 }
 
 impl TenantTx {
     /**
-     * Commits the underlying transaction. Handlers call this explicitly
-     * once their writes are done, rather than relying on drop, so a
-     * forgotten commit surfaces as "nothing persisted" in testing instead
-     * of silently succeeding.
+     * Commits the underlying transaction.
+     * Handlers call this explicitly once their writes are done, rather than relying on drop, so a forgotten commit surfaces as "nothing persisted" in testing instead of silently succeeding.
      */
     pub async fn commit(self) -> Result<(), ApiError> {
-        self.tx.commit().await.map_err(ApiError::from)
+        return self.tx.commit().await.map_err(ApiError::from);
     }
 }
 
@@ -95,26 +85,21 @@ where
                 .map_err(ApiError::from)?;
         }
 
-        Ok(TenantTx {
+        return Ok(TenantTx {
             tx,
             user_id: claims.sub,
             tenant_id: claims.tenant_id,
             store_id,
-        })
+        });
     }
 }
 
 // === AdminTx
 
 /**
- * Unscoped sibling of `TenantTx`, for pre-tenant / cross-tenant admin
- * handlers - signup, login, and refresh (no session exists yet to decode a
- * claim from), and platform-role operations that intentionally cross
- * tenants. Sets `app.bypass_tenant = 'on'` for the transaction, the only
- * way to satisfy the `FORCE ROW LEVEL SECURITY` write check when no single
- * tenant is in scope. Deliberately only reachable by routing a handler
- * through `AdminTx` at all - never a runtime toggle a `TenantTx` handler
- * can flip.
+ * Unscoped sibling of `TenantTx`, for pre-tenant / cross-tenant admin handlers - signup, login, and refresh (no session exists yet to decode a claim from), and platform-role operations that intentionally cross tenants.
+ * Sets `app.bypass_tenant = 'on'` for the transaction, the only way to satisfy the `FORCE ROW LEVEL SECURITY` write check when no single tenant is in scope.
+ * Deliberately only reachable by routing a handler through `AdminTx` at all - never a runtime toggle a `TenantTx` handler can flip.
  */
 pub struct AdminTx {
     tx: Transaction<'static, Postgres>,
@@ -124,19 +109,19 @@ impl Deref for AdminTx {
     type Target = PgConnection;
 
     fn deref(&self) -> &Self::Target {
-        &self.tx
+        return &self.tx;
     }
 }
 
 impl DerefMut for AdminTx {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tx
+        return &mut self.tx;
     }
 }
 
 impl AdminTx {
     pub async fn commit(self) -> Result<(), ApiError> {
-        self.tx.commit().await.map_err(ApiError::from)
+        return self.tx.commit().await.map_err(ApiError::from);
     }
 }
 
@@ -156,7 +141,7 @@ where
             .await
             .map_err(ApiError::from)?;
 
-        Ok(AdminTx { tx })
+        return Ok(AdminTx { tx });
     }
 }
 
@@ -174,19 +159,19 @@ fn bearer_claims(parts: &Parts, state: &AppState) -> Result<crate::auth::Claims,
         .strip_prefix("Bearer ")
         .ok_or_else(|| ApiError::Unauthorized("expected a Bearer token".to_string()))?;
 
-    decode_access_token(token, &state.jwt_secret)
+    return decode_access_token(token, &state.jwt_secret);
 }
 
 fn header_uuid(parts: &Parts, name: &str) -> Result<Option<Uuid>, ApiError> {
-    match parts.headers.get(name) {
+    return match parts.headers.get(name) {
         None => Ok(None),
         Some(value) => {
             let value = value
                 .to_str()
-                .map_err(|_| ApiError::bad_request(format!("invalid {name}")))?;
+                .map_err(|_| ApiError::bad_request(format!("invalid {}", name)))?;
             Uuid::parse_str(value)
                 .map(Some)
-                .map_err(|_| ApiError::bad_request(format!("invalid {name}")))
+                .map_err(|_| ApiError::bad_request(format!("invalid {}", name)))
         }
-    }
+    };
 }

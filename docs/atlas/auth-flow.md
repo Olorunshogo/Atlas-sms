@@ -1,11 +1,10 @@
 # Atlas Auth Flow
 
-What's built, what isn't yet, and the design for the rest - so the next
-pass implements against a plan rather than improvising per-endpoint. Mirrors
-Klassivox's `auth.md` in shape (same JWT + refresh-token architecture,
-adapted for Atlas's flat tenant model and `atlas-pos` in place of a second
-web app), not its content - Atlas's role model is `roles`/`role_grants`
-(dynamic, permission-array based), not Klassivox's fixed `app_role` enum.
+What's built, what isn't yet, and the design for the rest, so the next
+pass implements against a plan rather than improvising per-endpoint.
+JWT plus a rotating refresh token, on Atlas's flat tenant model.
+`atlas-pos` is a second client beside `atlas-web`. The role model is
+`roles`/`role_grants` (dynamic, permission-array based).
 
 ---
 
@@ -29,12 +28,15 @@ created).
 
 ### 3. Login - `POST /api/v1/auth/login`
 
-Verifies the password, resolves which tenant to authenticate into (the sole
-one if the user has exactly one active grant, otherwise the caller must name
-`tenant_id` - `409 TENANT_REQUIRED`), issues a 15-minute access JWT
-(`sub`, `tenant_id`, `exp`) and a 7-day opaque refresh token (stored
-SHA-256-hashed, see `crypto::hash_lookup_token`'s doc comment for why that's
-not Argon2).
+Verifies the password, then picks a tenant. Store-scoped grants count:
+a cashier's `role_grants.tenant_id` is set even though `scope` is `store`.
+One tenant logs the user in. More than one returns `409 TENANT_REQUIRED`
+with `{ data: { tenants: [{ id, name }] } }` until the body names
+`tenant_id`. A platform admin with no tenant grant gets
+`409 PLATFORM_TENANT_REQUIRED` and the full tenant list, and may name any
+existing tenant. The session is a 15-minute access JWT (`sub`, `tenant_id`,
+`exp`) and a 7-day opaque refresh token (stored SHA-256-hashed, see
+`crypto::hash_lookup_token`'s doc comment for why that's not Argon2).
 
 ### 4. Refresh - `POST /api/v1/auth/refresh`
 
@@ -62,24 +64,25 @@ the grant's `store_id` is set (visible/actionable at that store only);
 "tenant-scoped" means `store_id IS NULL` (every store the tenant has, now
 and later - opening store #2 needs no new grant for a tenant-scoped role).
 
-| Role             | Scope           | How they're provisioned                                                                          |
-| ---------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `owner`          | tenant          | **Signup** (`POST /auth/signup`). Exactly one per tenant at creation; a tenant can have more than one `owner` grant later only via the invite flow (#5), an owner inviting a co-owner. |
-| `admin`          | tenant          | **Invite** (#5), by an `owner` or an existing `admin` - `admin`'s own permission set is a subset of `owner`'s, so an admin inviting another admin passes the "can't grant more than you hold" check. |
-| `store_manager`  | store           | **Invite** (#5), by `owner`/`admin` (tenant-wide) or by a `store_manager` already granted at that specific store (a manager can build out their own store's team, not another store's). |
-| `cashier`        | store           | **Invite** (#5), by anyone holding `staff.invite` at that store - in practice `owner`/`admin`/`store_manager`. |
-| `stock_clerk`    | store           | Same as `cashier`.                                                                                  |
-| `accountant`     | tenant or store | **Invite** (#5). Tenant-scoped when the owner wants one bookkeeper across every branch; store-scoped when a store manager wants their own. Both are the same role definition - only the grant's `store_id` differs. |
-| `platform_admin` | platform        | **Direct provisioning only** (migration `20260922000022_seed_platform_admin_role.sql` seeds the role; no endpoint grants it). Atlas's own staff, never a tenant-assignable role - same invariant as Klassivox's platform roles. An internal admin tool to invite platform staff is out of scope until Atlas has more than a couple of internal operators. |
+| Role             | Scope           | How they're provisioned                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`          | tenant          | **Signup** (`POST /auth/signup`). Exactly one per tenant at creation; a tenant can have more than one `owner` grant later only via the invite flow (#5), an owner inviting a co-owner.                                                                                                                                                                                                                                                                          |
+| `admin`          | tenant          | **Invite** (#5), by an `owner` or an existing `admin` - `admin`'s own permission set is a subset of `owner`'s, so an admin inviting another admin passes the "can't grant more than you hold" check.                                                                                                                                                                                                                                                            |
+| `store_manager`  | store           | **Invite** (#5), by `owner`/`admin` (tenant-wide) or by a `store_manager` already granted at that specific store (a manager can build out their own store's team, not another store's).                                                                                                                                                                                                                                                                         |
+| `cashier`        | store           | **Invite** (#5), by anyone holding `staff.invite` at that store - in practice `owner`/`admin`/`store_manager`.                                                                                                                                                                                                                                                                                                                                                  |
+| `stock_clerk`    | store           | Same as `cashier`.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `accountant`     | tenant or store | **Invite** (#5). Tenant-scoped when the owner wants one bookkeeper across every branch; store-scoped when a store manager wants their own. Both are the same role definition - only the grant's `store_id` differs.                                                                                                                                                                                                                                             |
+| `platform_admin` | platform        | Seeded by `20260922000022_seed_platform_admin_role.sql`. Further staff are invited only by someone who already holds a platform grant: `POST /api/v1/auth/platform/invite` with `{ email }`. An existing account gets the grant immediately. A new email gets an `atlas.invites` row with `tenant_id` null (`20261020000024_platform_invites.sql`) and accepts it at `POST /api/v1/auth/invites/{token}/accept`. Never assigned through the tenant invite flow. |
 
 Two invariants that hold across every row above, already enforced by
 `roles::service::assert_permission`'s "granter can't exceed their own
 permissions" rule and the `role_grants` schema itself, not by a special
 case per role:
 
-- **Nobody can grant `platform_admin`** through the tenant invite flow -
-  it's a different `scope`, and the invite design (#5) only ever writes
-  `scope = 'tenant'`/`'store'` grants.
+- **Nobody can grant `platform_admin`** through `POST /api/v1/roles/invite`.
+  That path only writes `scope = 'tenant'` or `'store'`. Platform invites
+  are `POST /api/v1/auth/platform/invite`, and the caller must already hold
+  a platform grant.
 - **A custom role a tenant builds** (`roles.tenant_id` set,
   `is_system = false` - see the original scaffolding plan's "owner wants
   to build a custom role" example) goes through the exact same invite path
@@ -87,101 +90,97 @@ case per role:
 
 ---
 
-## Not built yet
+## Also built
 
-### 5. Invite a role - `POST /api/v1/tenants/roles/invite` (planned)
+### 5. Invite a role - `POST /api/v1/roles/invite`
 
-**The gap that matters most right now**: there is no way today for an owner
-to add an admin, or for anyone to add a store-scoped `store_manager`/
-`cashier`/`stock_clerk`/`accountant`. Every role grant in the schema besides
-the signup-time `owner` one is currently only reachable by hand-inserting a
-row.
-
-Design, following `roles::service::assert_permission`'s existing rule
-("a granter can never hand out more than they hold"):
+`TenantTx`, then `staff.invite`, then `assert_grantable` (a granter cannot
+hand out a permission they do not hold).
 
 ```
-POST /api/v1/tenants/roles/invite
-Auth: Bearer <token> (TenantTx)
+POST /api/v1/roles/invite
 Body: { email, role_id, store_id: Option<Uuid> }
 ```
 
-1. `assert_permission(caller, tenant_id, None, "staff.invite")`.
-2. Look up the target `role_id`'s `permissions`; reject if it is not a
-   subset of the caller's own effective permissions for that scope (the
-   same containment check `assert_permission` already does, exposed as a
-   standalone `assert_grantable` helper so it's reusable here).
-3. If a user with that email exists: insert a `role_grants` row directly,
-   `status = 'pending'`, and email an "you've been added to \<tenant\>"
-   notice (no new OTP needed - they already have a verified account).
-4. If no user exists: insert an `invites` table row (new migration -
-   `email`, `role_id`, `tenant_id`, `store_id`, `token_hash`, `expires_at`,
-   `accepted_at`) and email an invite link. Accepting it
-   (`POST /api/v1/auth/invites/:token/accept`, body: `full_name`, `phone`,
-   `password`) creates the user pre-verified (they proved control of the
-   email by receiving the link, so no separate OTP step) and the
-   `role_grants` row in one transaction.
+1. Existing account: insert an active `role_grants` row and email a notice.
+2. New email: insert `atlas.invites` (hashed token, 7-day expiry) and email
+   the token.
+3. `POST /api/v1/auth/invites/{token}/accept` with `full_name`, `phone`, and
+   `password` creates the user pre-verified and the grant. It does not log
+   them in.
 
-This is the mechanism behind "an admin can assign further roles" and "an
-owner branches out and staffs a new store" from the original design
-conversation - nothing else needs to change in the role/permission schema,
-this is the one missing endpoint set.
+### 6. Forgot / reset password
 
-### 6. Forgot / reset password (planned)
+`POST /api/v1/auth/forgot-password` always returns the same message.
+`POST /api/v1/auth/reset-password` consumes an OTP with purpose
+`password_reset` from `email_otps`, sets the new password, and revokes
+every refresh token. It does not log the user in.
 
-Same shape as Klassivox's: `POST /api/v1/auth/forgot-password` always
-returns the same message regardless of whether the email exists (anti-
-enumeration); consumes an OTP via `POST /api/v1/auth/reset-password`.
-Reuses the existing `email_otps` table with a new `purpose =
-'password_reset'` value - no schema change needed, `otp::generate_code`/
-`hash_code`/`verify_code` are already generic.
+### 7. Client token shape
 
-### 7. Mobile token delivery for `atlas-pos`
+`X-Client-Type` defaults to `web`. Web gets `Set-Cookie` only (`access_token`,
+`refresh_token`, HttpOnly). `app` gets the tokens in the JSON body and no
+cookie. The header is a response-shape hint, not a permission boundary.
 
-`atlas-marketing`'s Nitro proxy is the only client today, and it expects
-`Set-Cookie` (cookies read server-side, never handed to browser JS).
-`atlas-pos` is a Capacitor app with no server of its own - same problem
-Klassivox's auth.md solves with `X-Client-Type: app` returning tokens in
-the response body instead of a cookie.
+`atlas-web` never calls the API origin from the browser. Both apps
+use `@atlas/api`, an Axios client whose interceptors attach `x-client-type`
+and always settle on `{ status, body }` where `body` is
+`{ success, message, data?, code? }`. A missing body or a network failure
+becomes `{ success: false }` with status 502, so screens do not each parse
+Axios errors. Marketing's base URL is `/api`, so the call still hits Nitro
+(`server/api/[...path].ts`). That proxy injects the Bearer token from the
+cookie, copies `Set-Cookie` back, retries once on 401 via `/auth/refresh`,
+and on plain HTTP strips `Secure` so a local browser will store the cookie.
+Store selection is a separate HttpOnly cookie at `/session/store`, forwarded
+as `x-store-id`. The marketing client does not refresh on its own.
 
-Plan: `/auth/login` and `/auth/refresh` branch on `X-Client-Type`
-(`web` -> cookies only, no tokens in the body; `app` -> tokens in the body,
-no `Set-Cookie`), exactly Klassivox's resolution, for exactly the same
-reason (a `capacitor://` origin can't reliably receive an HttpOnly cookie
-cross-site). `X-Client-Type` is a response-shape hint only, never a
-permission boundary - neither mode may grant more than the other.
-`atlas-pos` keeps the refresh token in Capacitor secure storage and the
-access token in memory only, never `localStorage` - load-bearing given a
-POS device is more likely to be shared/lost than a phone.
+`atlas-pos` sends `X-Client-Type: app` and talks to the API directly. The
+access token and the refresh token stay in memory. A 401 on an authenticated
+call refreshes once, then retries. There is no Capacitor secure-storage
+plugin in the app yet, so a reload asks the cashier to log in again. Do not
+put either token in `localStorage`.
 
-### 8. Tenant/store switching mid-session
+### 8. Session, tenant switch, store switch
 
-Currently a user with grants in more than one tenant must re-login,
-naming `tenant_id`, to switch. Whether that's acceptable for v1 or needs a
-`POST /api/v1/auth/switch-tenant` (reissue a token for a different active
-grant without a full password re-entry) is an open question - low priority
-given Atlas's SOM is 1-20 stores under one tenant, so multi-tenant users are
-the exception, not the common case. Revisit if it becomes one.
+- `GET /api/v1/auth/me` returns the user, `tenant_id`, `is_platform_admin`,
+  and the tenants that user holds a grant in.
+- `POST /api/v1/auth/switch-tenant` with `{ tenant_id }` re-issues a session
+  for a grant the caller holds. A platform admin may name any existing tenant.
+- `GET /api/v1/auth/platform/tenants` lists every tenant. Platform staff only.
+- `POST /api/v1/auth/logout` revokes the presented refresh token. Web reads
+  it from the cookie (`RefreshRequest.refresh_token` may be empty). App sends
+  it in the body.
+- The dashboard and the POS home screen both expose the tenant list and the
+  store list. The web store id is the `/session/store` cookie. The POS store
+  id is memory and is sent as `x-store-id`.
 
 ### 9. Rate limiting
 
-Not implemented. `/auth/login` and future `/auth/forgot-password` are the
-two endpoints that need it most (credential stuffing, enumeration). Tracked
-as a gap, not designed yet - likely an `axum` middleware layer keyed by IP
-+ email, or pushed to the edge (Cloudflare) once `atlas-marketing` is
-actually deployed there.
+The whole `/api/v1/auth` router sits behind an in-memory per-IP limiter
+(`apps/atlas-backend/src/rate_limit.rs`). OTP verify and reset also count
+attempts on the code itself.
+
+### Web and POS screens
+
+`atlas-web` pages: `/` is the overview. Auth pages live under
+`/auth`: `/auth/signup`, `/auth/verify-email`, `/auth/login`,
+`/auth/forgot-password`, `/auth/reset-password`, `/auth/invites/[token]`.
+The signed-in home is `/dashboard`. The layout is a full-width header and
+footer. `/dashboard` uses the
+`auth` route middleware. Login renders the tenant picker when the API
+returns `TENANT_REQUIRED` or `PLATFORM_TENANT_REQUIRED`.
+
+`atlas-pos` routes: `/auth/login` and `/` (requires the in-memory session).
+Home can switch tenant, pick a store, invite platform staff, and log out.
+Checkout and offline sale sync are not on these screens yet.
 
 ---
 
-## Build order for the rest
+## Still open
 
-1. Invite flow (#5) - unblocks the entire "admin adds staff" story, which
-   nothing else in the roles/permissions design depends on but which is
-   completely unusable without it today.
-2. Forgot/reset password (#6) - small, reuses existing tables.
-3. `X-Client-Type` mobile branch (#7) - needed before `atlas-pos` can
-   authenticate at all, so it's a prerequisite for wiring real screens
-   there, not before.
-4. Tenant switching (#8) and rate limiting (#9) - defer until a real need
-   shows up; tracked here so they aren't forgotten, not because they're
-   next.
+- Capacitor secure storage for the POS refresh token. Memory-only is the
+  current stand-in.
+- A checkout screen that calls `POST /api/v1/sales` and
+  `POST /api/v1/sync/sales`.
+- A UI for building custom roles. The API path is the same invite endpoint.
+  There is no screen that inserts a custom `atlas.roles` row.

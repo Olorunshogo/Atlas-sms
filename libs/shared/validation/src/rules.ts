@@ -2,23 +2,21 @@ import * as z from 'zod';
 
 /**
  * Reusable zod rule factories - the single source of truth for "what does a
- * valid email/phone/password/etc. look like" across every Klassivox form.
- * Ported from Stayar's schemas/generics.ts pattern (factory functions that
- * take a custom error message, return a zod schema), ahead of any real input
- * field consuming them yet - no page imports this today. Import a rule only
- * where you're actually validating that field; don't import the whole file
- * for one rule.
+ * valid email/phone/password/etc. look like" across every Atlas form.
+ * Ported from the reference source's schemas/generics.ts pattern (factory functions that
+ * take a custom error message, return a zod schema).
+ * Import a rule only where you're actually validating that field; don't import the whole file for one rule.
  *
- * Usage once a form exists:
+ * Usage:
  * ```ts
- * import { createEmailSchema, createRequiredString } from '@atlasvalidation';
+ * import { createEmailSchema, createRequiredString, toZod4TypedSchema } from '@atlas/validation';
  * const schema = z.object({
  *   email: createEmailSchema(),
  *   firstName: createRequiredString('First name'),
  * });
- * // then wire the schema into vee-validate via @vee-validate/zod's
- * // toTypedSchema(), per docs/API/stayar-api.md's use<Capability>Service
- * // convention.
+ * // then wire the schema into vee-validate's useForm({ validationSchema: toZod4TypedSchema(schema) }).
+ * // Not @vee-validate/zod's toTypedSchema: this workspace is on zod v4,
+ * // which toTypedSchema doesn't support yet. See vee-validate-zod4.ts.
  * ```
  */
 
@@ -30,7 +28,7 @@ export function createEmailSchema(message = 'Invalid email address') {
 /**
  * Nigerian-format local phone number: 7-15 digits, optional leading 0
  * (e.g. "09012288798" or "9012288798"). Regex-only, no phone-parsing
- * dependency - Stayar's original also had a stricter `phoneSchema` built on
+ * dependency - the reference source's original also had a stricter `phoneSchema` built on
  * `libphonenumber-js`; that's a real dependency decision (accuracy vs. bundle
  * size) worth making deliberately once a real phone input exists, not
  * silently added here. Strip any leading 0 in the submission layer, not here.
@@ -73,9 +71,8 @@ export function createRequiredString(fieldName: string, message?: string) {
 }
 
 /**
- * Longer free-text field (notes, KYC rejection reasons, report-card
- * comments). Not in Stayar's original generics.ts - added for Klassivox
- * since school-domain forms need this more than Stayar's did. `max` guards
+ * Longer free-text field (notes, rejection reasons, receipt comments).
+ * Not in the reference source's original generics.ts. `max` guards
  * against unbounded text hitting the database/PDF-generation layer.
  */
 export function createLongTextSchema(
@@ -91,11 +88,9 @@ export function createLongTextSchema(
 }
 
 /**
- * Calendar date field (date of birth, academic year start/end, attendance
- * date). Not in Stayar's original generics.ts (a rental platform had no
- * real need for it) - Klassivox's domain (student DOB, academic terms,
- * attendance) needs this constantly, so it's added here rather than
- * reinvented per form. Expects an ISO date string ("YYYY-MM-DD") since
+ * Calendar date field (date of birth, expiry, shift date). Not in the
+ * reference source's original generics.ts (a rental platform had no real need for it). Added
+ * here rather than reinvented per form. Expects an ISO date string ("YYYY-MM-DD") since
  * that's what a native `<input type="date">` and most date pickers emit;
  * `min`/`max` are optional ISO-date bounds (e.g. DOB must be in the past).
  */

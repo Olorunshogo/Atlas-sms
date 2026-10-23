@@ -1,8 +1,7 @@
 /*
  * SaaS subscription for Atlas itself, not to be confused with a store's
  * own sales (atlas.sales). Tiered by location count + module access per
- * the PRD's business model - genuinely absent from Klassivox's schema,
- * since schools don't have SaaS tiers the same way.
+ * the PRD's business model.
  */
 CREATE TYPE atlas.subscription_tier AS ENUM ('starter', 'growth', 'multi_location');
 CREATE TYPE atlas.subscription_status AS ENUM ('trialing', 'active', 'past_due', 'canceled');
@@ -73,8 +72,7 @@ CREATE POLICY payments_isolation ON atlas.payments
     );
 
 /*
- * Step-up confirmation state machine, same shape as Klassivox's refunds
- * table: a refund is not a single write. The first request marks
+ * Step-up confirmation state machine: a refund is not a single write. The first request marks
  * `awaiting_confirmation` and mints a confirmation token; a second,
  * confirmed request (matching, unexpired token) executes it. A refund
  * above a threshold being a single unconfirmed POST is exactly the kind

@@ -9,16 +9,13 @@ use super::models::Role;
 
 pub enum InviteOutcome {
     GrantedExisting,
-    /// Carries the raw (unhashed) token - only ever handed to the caller
-    /// once, to put in an email link. Never stored or logged as-is.
-    CreatedInvite {
-        token: String,
-        email: String,
-    },
+    /// Carries the raw (unhashed) token - only ever handed to the caller once, to put in an email link.
+    /// Never stored or logged as-is.
+    CreatedInvite { token: String, email: String },
 }
 
 pub async fn list_roles(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Vec<Role>, ApiError> {
-    sqlx::query_as::<_, Role>(
+    return sqlx::query_as::<_, Role>(
         "SELECT id, tenant_id, name, permissions::text[] AS permissions, is_system
          FROM atlas.roles
          WHERE tenant_id IS NULL OR tenant_id = $1
@@ -27,17 +24,12 @@ pub async fn list_roles(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Vec<
     .bind(tenant_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 /**
- * The one generic permission check every handler that gates on a
- * capability calls, rather than each action writing its own bespoke role
- * assertion. `store_id` is `None` for a tenant-wide action (e.g. opening a
- * new store); a caller's grant satisfies the check when it is a platform
- * grant, a tenant-wide grant matching `tenant_id`, a store grant matching
- * `store_id`, or a store-group grant covering `store_id` (the V2 regional-
- * manager case, already join-able even before the UI to manage it exists).
+ * The one generic permission check every handler that gates on a capability calls, rather than each action writing its own bespoke role assertion.
+ * `store_id` is `None` for a tenant-wide action (e.g. opening a new store); a caller's grant satisfies the check when it is a platform grant, a tenant-wide grant matching `tenant_id`, a store grant matching `store_id`, or a store-group grant covering `store_id` (the V2 regional-manager case, already join-able even before the UI to manage it exists).
  */
 pub async fn assert_permission(
     conn: &mut PgConnection,
@@ -46,6 +38,26 @@ pub async fn assert_permission(
     store_id: Option<Uuid>,
     permission: &str,
 ) -> Result<(), ApiError> {
+    return match has_permission(conn, user_id, tenant_id, store_id, permission).await? {
+        true => Ok(()),
+        false => Err(ApiError::forbidden(format!(
+            "Missing permission: {}",
+            permission
+        ))),
+    };
+}
+
+/**
+ * Same check as `assert_permission`, answered as a bool instead of a 403.
+ * For decisions that change behaviour rather than block the request outright - a discount above the cashier limit, a price override, whether a return needs approval.
+ */
+pub async fn has_permission(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    tenant_id: Uuid,
+    store_id: Option<Uuid>,
+    permission: &str,
+) -> Result<bool, ApiError> {
     let granted: Option<i32> = sqlx::query_scalar(
         r#"
         SELECT 1
@@ -73,21 +85,96 @@ pub async fn assert_permission(
     .fetch_optional(conn)
     .await?;
 
-    match granted {
-        Some(_) => Ok(()),
-        None => Err(ApiError::forbidden(format!(
-            "Missing permission: {permission}"
-        ))),
+    return Ok(granted.is_some());
+}
+
+/// Where a permission reaches for one user: every store in the tenant, or only an explicit list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreScope {
+    All,
+    Stores(Vec<Uuid>),
+}
+
+impl StoreScope {
+    pub fn includes(&self, store_id: Uuid) -> bool {
+        return match self {
+            StoreScope::All => true,
+            StoreScope::Stores(ids) => ids.contains(&store_id),
+        };
+    }
+
+    /// `None` means unrestricted, for binding straight into a `($n::uuid[] IS NULL OR store_id = ANY($n))` filter.
+    pub fn as_filter(&self) -> Option<Vec<Uuid>> {
+        return match self {
+            StoreScope::All => None,
+            StoreScope::Stores(ids) => Some(ids.clone()),
+        };
     }
 }
 
 /**
- * The union of every permission a caller effectively holds at this scope,
- * across however many role grants they have that reach it. Backs
- * `assert_grantable`: a granter's power to hand out a role is the
- * permissions they hold, not any single grant's permissions in isolation
- * (an admin who is also a store's stock_clerk still has the admin-level
- * union when inviting at that store).
+ * The stores a permission covers for this user, for list endpoints that span stores (sales search, customer history) instead of naming one.
+ * A platform or tenant grant covers every store; otherwise it's the union of store grants and store-group grants. An empty list means the permission reaches nowhere and callers should 403.
+ */
+pub async fn stores_with_permission(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    tenant_id: Uuid,
+    permission: &str,
+) -> Result<StoreScope, ApiError> {
+    let wide: Option<i32> = sqlx::query_scalar(
+        r#"
+        SELECT 1
+        FROM atlas.role_grants rg
+        JOIN atlas.roles r ON r.id = rg.role_id
+        WHERE rg.user_id = $1
+          AND rg.status = 'active'
+          AND $3::atlas.permission = ANY(r.permissions)
+          AND (rg.scope = 'platform' OR (rg.scope = 'tenant' AND rg.tenant_id = $2))
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(tenant_id)
+    .bind(permission)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if wide.is_some() {
+        return Ok(StoreScope::All);
+    }
+
+    let stores: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT store_id FROM (
+            SELECT rg.store_id
+            FROM atlas.role_grants rg
+            JOIN atlas.roles r ON r.id = rg.role_id
+            WHERE rg.user_id = $1 AND rg.status = 'active' AND rg.tenant_id = $2
+              AND rg.scope = 'store' AND $3::atlas.permission = ANY(r.permissions)
+            UNION
+            SELECT sgg.store_id
+            FROM atlas.role_grants rg
+            JOIN atlas.roles r ON r.id = rg.role_id
+            JOIN atlas.store_group_grants sgg ON sgg.role_grant_id = rg.id
+            WHERE rg.user_id = $1 AND rg.status = 'active' AND rg.tenant_id = $2
+              AND $3::atlas.permission = ANY(r.permissions)
+        ) s
+        WHERE store_id IS NOT NULL
+        "#,
+    )
+    .bind(user_id)
+    .bind(tenant_id)
+    .bind(permission)
+    .fetch_all(conn)
+    .await?;
+
+    return Ok(StoreScope::Stores(stores));
+}
+
+/**
+ * The union of every permission a caller effectively holds at this scope, across however many role grants they have that reach it.
+ * Backs `assert_grantable`: a granter's power to hand out a role is the permissions they hold, not any single grant's permissions in isolation (an admin who is also a store's stock_clerk still has the admin-level union when inviting at that store).
  */
 async fn effective_permissions(
     conn: &mut PgConnection,
@@ -95,7 +182,7 @@ async fn effective_permissions(
     tenant_id: Uuid,
     store_id: Option<Uuid>,
 ) -> Result<Vec<String>, ApiError> {
-    sqlx::query_scalar(
+    return sqlx::query_scalar(
         r#"
         SELECT DISTINCT unnest(r.permissions)::text
         FROM atlas.role_grants rg
@@ -118,15 +205,12 @@ async fn effective_permissions(
     .bind(store_id)
     .fetch_all(conn)
     .await
-    .map_err(ApiError::from)
+    .map_err(ApiError::from);
 }
 
 /**
- * "A granter can never hand out more than they hold" - the rule that makes
- * the dynamic role system safe without a rigid hierarchy table. Compares
- * `target_role_id`'s full permission set against the granter's effective
- * permissions (above) at the same scope; any permission the target role
- * has that the granter doesn't is a 403.
+ * "A granter can never hand out more than they hold" - the rule that makes the dynamic role system safe without a rigid hierarchy table.
+ * Compares `target_role_id`'s full permission set against the granter's effective permissions (above) at the same scope; any permission the target role has that the granter doesn't is a 403.
  */
 pub async fn assert_grantable(
     conn: &mut PgConnection,
@@ -142,30 +226,25 @@ pub async fn assert_grantable(
             .await?
             .ok_or_else(|| ApiError::bad_request("Unknown role."))?;
 
-    let granter_permissions =
-        effective_permissions(conn, granter_user_id, tenant_id, store_id).await?;
+    let granter_permissions = effective_permissions(conn, granter_user_id, tenant_id, store_id).await?;
 
-    let ungranted = target_permissions
-        .iter()
-        .find(|permission| !granter_permissions.contains(permission));
+    let ungranted = target_permissions.iter().find(|permission| !granter_permissions.contains(permission));
 
-    match ungranted {
+    return match ungranted {
         None => Ok(()),
         Some(permission) => Err(ApiError::forbidden(format!(
-            "You cannot grant a role with the \"{permission}\" permission, which you do not hold yourself."
+            "You cannot grant a role with the \"{}\" permission, which you do not hold yourself.",
+            permission
         ))),
-    }
+    };
 }
 
 /**
- * The two-branch invite (docs/atlas/auth-flow.md #5). An existing,
- * verified user has nothing left to prove - they get the `role_grants` row
- * directly, `status = 'active'`, no token needed. A brand-new email goes
- * through `atlas.invites`; accepting it (`auth::handlers::accept_invite`)
- * is what actually creates the user and the grant, in one transaction.
+ * The two-branch invite (docs/atlas/auth-flow.md #5).
+ * An existing, verified user has nothing left to prove - they get the `role_grants` row directly, `status = 'active'`, no token needed.
+ * A brand-new email goes through `atlas.invites`; accepting it (`auth::handlers::accept_invite`) is what actually creates the user and the grant, in one transaction.
  *
- * Callers must run `assert_grantable` first - this function trusts that
- * the containment check already happened, it doesn't repeat it.
+ * Callers must run `assert_grantable` first - this function trusts that the containment check already happened, it doesn't repeat it.
  */
 pub async fn invite(
     conn: &mut PgConnection,
@@ -175,11 +254,7 @@ pub async fn invite(
     email: &str,
     invited_by_user_id: Uuid,
 ) -> Result<InviteOutcome, ApiError> {
-    let scope = if store_id.is_some() {
-        "store"
-    } else {
-        "tenant"
-    };
+    let scope = if store_id.is_some() { "store" } else { "tenant" };
 
     let existing_user_id: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM atlas.users WHERE email = $1 AND deleted_at IS NULL")
@@ -225,8 +300,5 @@ pub async fn invite(
     .execute(conn)
     .await?;
 
-    Ok(InviteOutcome::CreatedInvite {
-        token,
-        email: email.to_string(),
-    })
+    return Ok(InviteOutcome::CreatedInvite { token, email: email.to_string() });
 }

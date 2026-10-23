@@ -8,5 +8,5 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/me", get(handlers::me))
+    return Router::new().route("/me", get(handlers::get_current_tenant).patch(handlers::update_business_details));
 }

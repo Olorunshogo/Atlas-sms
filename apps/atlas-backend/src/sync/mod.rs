@@ -6,5 +6,5 @@ use axum::Router;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/sales", post(handlers::sync_sale))
+    return Router::new().route("/sales", post(handlers::sync_sale));
 }

@@ -1,4 +1,4 @@
-# Klassivox - Claude Instructions
+# Atlas - Claude Instructions
 
 Project-specific additions to the global instructions. Commit message format, branch naming, and PR rules are already fully defined in [CONTRIBUTING.md](./CONTRIBUTING.md) - this file only adds what CONTRIBUTING.md doesn't cover.
 
@@ -18,7 +18,7 @@ these conventions where a comment is actually warranted, not as decoration
 on every few lines - a file with a heading divider every five lines is
 noise, not structure.
 
-**Single-line:** `//` - Rust (`atlas-backend`), TypeScript/JavaScript, and inside Vue's `<script>`/`<script setup>` blocks (`atlas-web`, `landing-page`, `@atlasui-core`, `@atlasui-web`, `@atlasui-app`).
+**Single-line:** `//` - Rust (`atlas-backend`), TypeScript/JavaScript, and inside Vue's `<script>`/`<script setup>` blocks (`atlas-web`, `atlas-pos`, `@atlas/ui-core`, `@atlas/ui-web`, `@atlas/ui-app`).
 
 **Section-heading comments (`//` with `=` signs) - a heading hierarchy, use only the depth a file actually needs:**
 
@@ -38,7 +38,7 @@ noise, not structure.
 
 - Rust, TypeScript, JavaScript (anywhere outside JSX markup): `/** ... */` with each continuation line prefixed `* ` and aligned under the opening `/**`. Don't stack bare `// line one` / `// line two` comments to fake a paragraph, and don't write a single-line-style `/* all of this on one line */` for something that's actually multiple sentences of reasoning - use the JSDoc block shape above once it's genuinely multi-line.
 - JSX/TSX markup (only relevant if React ever reappears in this repo - there is no React code in the tree currently): `{/* ... */}` - the braces are required there because a JSX child must be a valid JS expression. `{/* */}` is invalid everywhere else - never use it in Rust or plain TS/JS logic.
-- Vue `<template>` blocks (`.vue` files across `atlas-web`, `landing-page`, `@atlasui-core`, `@atlasui-web`, `@atlasui-app`): HTML-style `<!-- ... -->`. Vue `<script>` blocks use normal `//` / `/** */`, not JSX or HTML syntax.
+- Vue `<template>` blocks (`.vue` files across `atlas-web`, `atlas-pos`, `@atlas/ui-core`, `@atlas/ui-web`, `@atlas/ui-app`): HTML-style `<!-- ... -->`. Vue `<script>` blocks use normal `//` / `/** */`, not JSX or HTML syntax.
 
 **No em dash in any comment**, single-line or block - same rule as markdown/commits/PRs elsewhere in this file. Use a plain hyphen or rewrite the sentence.
 
@@ -51,32 +51,20 @@ Replaces the three navigation-only files that used to sit in
 `START_HERE.md`), each of which existed only to explain the reading order
 of the others.
 
-**Before writing any code:** [docs/repo/CONTEXT.md](docs/repo/CONTEXT.md).
-The "Locked architecture decisions" section is settled and closed. Do not
-re-litigate or work around anything in it. Then
-[docs/repo/NEXT.md](docs/repo/NEXT.md) for what is actually built right now
-and what comes next, since it is the only doc that tracks state.
+**Before writing any code:** [docs/atlas/CONTEXT.md](docs/atlas/CONTEXT.md).
+The locked architecture decisions are settled. Do not re-litigate or work
+around them.
 
-**Before building UI:**
-
-- [docs/frontend/design/THEME.md](docs/frontend/design/THEME.md) - design
-  tokens, per-school theming, responsiveness, accessibility floor. Note the
-  hard rule that no component hardcodes a Tailwind colour.
-- `docs/frontend/design/getting-started/components/SHARED_COMPONENTS.md` -
-  anatomy of the shared components.
-- `docs/frontend/design/getting-started/actors/` - persona and journey per
-  role. Read the one you are building for.
-- `docs/frontend/design/dashboard/` and `docs/frontend/design/shared/` -
-  post-onboarding surfaces.
-- `docs/frontend/design/PROMPT_GUIDE.md` - the eleven-section structure for
-  writing a new screen brief.
+**Before building UI:** [docs/atlas/SystemDesignDocument.md](docs/atlas/SystemDesignDocument.md)
+and [docs/RolesAndPermissions.md](docs/RolesAndPermissions.md). No component
+hardcodes a Tailwind colour; use the tokens in `libs/shared/theme`.
 
 **Before touching the schema or auth:** the migrations under
 `apps/atlas-backend/migrations/` are the source of truth for schema,
 ahead of any SQL excerpt in a doc.
-[docs/backend/auth.md](docs/backend/auth.md) and
-[docs/backend/kyc-schema-api.md](docs/backend/kyc-schema-api.md) cover the
-endpoint and permission design.
+[docs/atlas/auth-flow.md](docs/atlas/auth-flow.md) matches the auth handlers
+and the marketing and POS screens. The migrations remain the schema source
+of truth if a doc and a migration disagree.
 
 **Package placement:** if a second app could plausibly need it, it does not
 live in an app. `@nx/enforce-module-boundaries` enforces this, so getting

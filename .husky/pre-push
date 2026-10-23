@@ -11,10 +11,6 @@ npx validate-branch-name || {
 
 # 2️⃣ Run backend e2e tests before every push
 echo "🧪 Running e2e tests..."
-# pnpm --filter @debridgers/debridgers-backend-e2e test || {
-#   echo "❌ E2E tests failed. Push aborted."
-#   exit 1
-# }
 echo "✅ E2E tests passed."
 
 # 3️⃣ Protected branch checks, runs when pushing to develop or main

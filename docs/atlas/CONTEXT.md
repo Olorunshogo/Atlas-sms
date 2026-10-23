@@ -1,17 +1,14 @@
 # Atlas-sms - Locked Architecture Decisions
 
 Settled for this pass of scaffolding. Do not re-litigate without a real
-reason to. Where a decision differs from Klassivox's own `CONTEXT.md`, the
-difference is deliberate and explained - Atlas reuses Klassivox's *tooling*
-(Nx monorepo, Rust/Axum/sqlx/Postgres, Nuxt SSR, the TenantTx/RLS
-mechanism), not its domain model. See `docs/Atlas/README.md` for the
+reason to. The tooling is an Nx monorepo, Rust/Axum/sqlx/Postgres, Nuxt SSR,
+and the TenantTx/RLS mechanism. The domain model is Atlas's own: tenants
+and stores, not a school hierarchy. See `docs/atlas/README.md` for the
 product-level reasoning this schema is built from.
 
 ## 1. Flat tenant -> stores, no ancestor hierarchy
 
-Unlike Klassivox's self-referencing `organizations.parent_organization_id`
-(justified by diocese/state-ministry chains at national scale), Atlas's
-stated scale is 1-20 stores per tenant. `atlas.stores.tenant_id` is a
+Atlas's stated scale is 1-20 stores per tenant. `atlas.stores.tenant_id` is a
 direct FK, no chain-walking. Cross-store access for a role grant that isn't
 full tenant-wide is `atlas.store_group_grants`, not a parent/child tree.
 A real franchise/holding-company hierarchy (`tenants.parent_tenant_id`) is
@@ -29,15 +26,12 @@ handler calls - no per-action bespoke SQL).
 
 ## 3. Own Postgres server, own schema
 
-Atlas runs on its own Postgres server (`docker-compose.atlas.yml`),
-entirely separate from Klassivox's. Tables additionally live in an `atlas`
-Postgres schema rather than `public`, and the app connects as `atlas_api`
-(never the superuser - RLS is bypassed entirely for a superuser
-connection). Both layers of separation exist so a bug or incident in one
-product has no path to the other's data, even if the two ever end up on
-one instance.
+Atlas runs on its own Postgres server (`docker-compose.atlas.yml`).
+Tables live in an `atlas` Postgres schema rather than `public`, and the
+app connects as `atlas_api` (never the superuser, because a superuser
+bypasses RLS).
 
-## 4. RLS is the same fail-closed mechanism, renamed
+## 4. RLS is fail-closed
 
 `TenantTx` (Rust extractor) sets `app.current_tenant_id` /
 `app.current_store_id` via `set_config` immediately after `BEGIN`; every
@@ -48,64 +42,66 @@ platform-role work that intentionally crosses tenants.
 
 ## 5. UUIDv7, app-generated
 
-Same reasoning as Klassivox: sequential IDs would let a tenant enumerate
+Sequential IDs would let a tenant enumerate
 record counts off a public store slug. `Uuid::now_v7()` in Rust, never a
 DB default.
 
-## 6. Web app naming: `atlas-marketing` does both marketing and dashboard
+## 6. Web app naming: `atlas-web` does both marketing and dashboard
 
-Unlike Klassivox's split (`landing-page` vs `atlas-web`), Atlas's one
-Nuxt app, `apps/atlas-marketing`, carries both the public pages and the
+Atlas's one Nuxt app, `apps/atlas-web`, carries both the public pages and the
 authenticated owner/manager dashboard (Nitro proxy, cookie/Bearer auth,
 401-retry) under one name. Deliberate choice, made explicitly, not a
 default.
 
 ## 7. POS is a separate client, not a web page
 
-Per the PRD, the point-of-sale terminal is a native/tablet app. The closer
-existing analogue is `atlas-mobile` (Ionic + Capacitor) than the web
-dashboard. `apps/atlas-pos` itself is not yet scaffolded - no screens exist
-yet, and an empty Capacitor shell with no actual POS flow is speculative
-scaffolding rather than useful structure. Build it when the offline-sync
-API contract (`docs/atlas-sms-schema-notes.md`) has a first real endpoint
-to call. `@atlas/ui-app` (the package it will depend on) is already in
-place, since the UI kit's three-package split is infrastructure, not a
-speculative feature.
+Per the PRD, the point-of-sale terminal is a native/tablet app, so it is
+`apps/atlas-pos` (Ionic + Capacitor), not a route inside `atlas-web`.
+Login and a home screen exist: tenant switch, store selection, platform
+invite, and logout, using `X-Client-Type: app`. Checkout and offline sync
+are not on those screens yet. `@atlas/ui-app` is the Ionic package it can
+depend on.
 
 ## 8. No CI workflow yet
 
-Klassivox's own `ARCHITECTURE.md` documents a 4-tier CI pipeline as intent,
-but no `.github/workflows/` exists in this repo yet for either product.
-Atlas doesn't invent one unilaterally; it gets wired in alongside
-Klassivox's, when that work happens, not before.
+No `.github/workflows/` exists in this repo yet.
+CI gets wired when that work happens, not before.
 
-## What shipped in this scaffolding pass
+## What is in the tree now
 
-- `apps/atlas-backend` - Rust/Axum/sqlx crate, compiles and its health
-  check test passes. `tenants`, `stores`, `roles` modules with real
-  (not stubbed) `TenantTx`-scoped handlers, backed by six migrations
-  (schema, users, tenants, stores, roles/grants, RLS).
-- `docker-compose.atlas.yml` + `docker/atlas-postgres-init.sql` - Atlas's
-  own Postgres server, port 5434.
-- `.env.example` - `ATLAS_*` variables appended.
-- `apps/atlas-marketing` - Nuxt app structure (pages/layouts/types,
-  Nitro proxy) mirroring atlas-web's conventions. Not yet
-  `pnpm install`-ed or run.
-- `packages/atlas-ui/{core,web,app}` - full three-package split mirroring
-  atlas-ui's build tooling (tsup, vite, vitest, Storybook on port 6007
-  so it can run alongside atlas-ui's on 6006). No components ported
-  from Klassivox - `core`'s `lib/` and `components/ui/` are empty stubs
-  with the directory shape in place; `web`/`app` just re-export `core`.
-  Registered in `pnpm-workspace.yaml`.
-- `docs/v2.md` - V2-deferred scope tracker.
+- `apps/atlas-backend` - Rust/Axum/sqlx. Auth, tenants, stores, roles,
+  products, stock, sales, purchasing, customers, and payments have handlers.
+  Migrations live under `apps/atlas-backend/migrations/`, including
+  `20261020000024_platform_invites.sql`. The app connects as `atlas_api`.
+- `docker-compose.atlas.yml` + `docker/atlas-postgres-init.sql` - Postgres
+  on host port 5434, login role `atlas_api`.
+- `apps/atlas-web` - public pages, auth screens, and the dashboard,
+  behind a full-width header and footer. The Nitro proxy holds the
+  session cookies. See `docs/atlas/auth-flow.md`.
+- `apps/atlas-pos` - login and a session home screen. Checkout is not built.
+- `packages/atlas-ui/{core,web,app}` - Vue UI packages. `web` and `app`
+  re-export `core`.
+- `docs/v2.md` - scope deliberately deferred past v1.
 
 ## What's still open
 
-- Auth (signup/login/JWT) - `atlas-backend` has no `auth` module yet;
-  the extractors currently trust raw headers, matching the same
-  documented pre-auth caveat Klassivox's `TenantTx` started with.
-- `apps/atlas-pos` (POS client) - see item 7.
-- Product/inventory/sales/billing schema from
-  `docs/atlas-sms-schema-notes.md` - not yet migrated.
-- `pnpm install` across the new packages, and a first `pnpm dlx nuxi`
-  verification that atlas-marketing actually boots.
+- The POS checkout screen and the offline sale sync client. The backend
+  for FR-15 to FR-19 is built: catalog search, barcode lookup, quote and
+  offline snapshot under `/api/v1/stores/{id}/catalog`, server-priced
+  checkout (`POST /api/v1/sales`, `POST /api/v1/sync/sales`), payments,
+  receipts with per-store gap-free numbering, returns and customers. No
+  screen calls them yet. Pinia is
+  already a dependency and unused; the cart (`addItem`, `removeItem`,
+  `updateQuantity`, `applyDiscount`, `clearCart`, a running total several
+  components read, payment status pending/success/failed, and persistence
+  across a reload or backgrounded app via `pinia-plugin-persistedstate`) is
+  the natural place to use it. Session/auth state stays a plain composable;
+  it is not what Pinia is for here.
+- Capacitor secure storage for the POS refresh token. It is memory-only today.
+- A screen for custom roles. Invite of a seeded role is built.
+- `module_toggles` has no HTTP API yet. Price rules can be created
+  (`POST /api/v1/products/{id}/price-rules`) but not edited or deleted.
+- No payment gateway: a `pending` card or transfer payment is confirmed
+  by a person (`POST /api/v1/payments/{id}/status`), not a webhook.
+  Store credit can be refunded to but not yet spent at checkout.
+- No CI workflow. See item 8.

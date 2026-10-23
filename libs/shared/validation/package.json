@@ -6,8 +6,12 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json"
+  },
   "dependencies": {
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@atlas/data": "workspace:*"
   },
   "nx": {
     "tags": [

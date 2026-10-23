@@ -22,9 +22,8 @@ pub struct CreateStoreRequest {
 }
 
 /**
- * Every field optional; absent means unchanged. `address: null` clears it.
- * Unknown fields are rejected so a client sending `currency` or
- * `tenant_id` finds out it did nothing instead of assuming it worked.
+ * Every field optional; absent means unchanged, and `address: null` clears it.
+ * Unknown fields are rejected so a client sending `currency` or `tenant_id` finds out it did nothing instead of assuming it worked.
  */
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,9 +37,6 @@ pub struct UpdateStoreRequest {
 
 impl UpdateStoreRequest {
     pub fn is_empty(&self) -> bool {
-        self.name.is_none()
-            && self.slug.is_none()
-            && self.address.is_none()
-            && self.is_active.is_none()
+        return self.name.is_none() && self.slug.is_none() && self.address.is_none() && self.is_active.is_none();
     }
 }

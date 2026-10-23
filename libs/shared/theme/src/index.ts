@@ -1,7 +1,7 @@
 // === Colors
 /**
  * Neutral placeholder values (see docs/frontend/design/THEME.md) - swap the
- * underlying CSS vars in global.css when Klassivox picks its own identity,
+ * underlying CSS vars in global.css when Atlas picks its own identity,
  * these exports don't need to change.
  */
 export const colors = {

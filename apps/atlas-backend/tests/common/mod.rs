@@ -1,513 +1,425 @@
+//! Shared harness for the sales, payments, receipts, returns and customer integration tests.
+//! Same `#[sqlx::test]` + real-router pattern as `commerce_tests.rs`; needs a plain `DATABASE_URL` pointing at a Postgres that can create databases.
+
 #![allow(dead_code)]
 
-use std::str::FromStr;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
-use atlas_backend::{api_router, issue_access_token, AppState, LogEmailProvider};
+use atlas_backend::{api_router, AppState, LogEmailProvider, RateLimiter};
 use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
+use axum::extract::ConnectInfo;
+use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
-use rust_decimal::Decimal;
 use serde_json::{json, Value};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-// === Setup
+pub const JWT_SECRET: &[u8] = b"test-only-secret-not-for-production";
 
-/// Tests run in parallel inside one process; migrating concurrently races.
-static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+// === Router and requests
 
-const JWT_SECRET: &[u8] = b"integration-test-secret";
-const OWNER_ROLE_ID: &str = "00000000-0000-7000-8000-000000000001";
-pub const ADMIN_ROLE_ID: &str = "00000000-0000-7000-8000-000000000002";
-pub const MANAGER_ROLE_ID: &str = "00000000-0000-7000-8000-000000000003";
-pub const ACCOUNTANT_ROLE_ID: &str = "00000000-0000-7000-8000-000000000006";
-pub const CASHIER_ROLE_ID: &str = "00000000-0000-7000-8000-000000000004";
-
-fn env(name: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| {
-        panic!(
-            "{name} must be set to run the integration tests - see the README's \
-             \"Running the tests\" section. They need a real Postgres, not a mock."
-        )
-    })
-}
-
-/**
- * One tenant with three stores, a product, a price and an owner, created
- * through the superuser connection. Every test builds its own, so tests
- * share a database but never rows, and can run in parallel.
- */
-pub struct World {
-    pub app: Router,
-    /// Superuser connection, bypasses RLS: for fixtures and for asserting on raw tables.
-    pub admin: PgPool,
-    pub tenant_id: Uuid,
-    pub owner_id: Uuid,
-    pub token: String,
-    pub stores: [Uuid; 3],
-    pub shifts: [Uuid; 3],
-    pub rice: Uuid,
-    pub piece_unit: Uuid,
-}
-
-/**
- * A tenant with an owner and nothing else: no stores, units, products or
- * prices. For tests that must build everything through the API.
- */
-pub async fn bare_world() -> World {
-    /*
-     * Pinned to `public` because the admin role is conventionally named
-     * `atlas`, the same as the schema: with the default search_path
-     * ("$user", public) sqlx's bookkeeping table lands in the `atlas`
-     * schema on the second run and every migration replays.
-     */
-    let admin_options = PgConnectOptions::from_str(&env("ATLAS_TEST_DATABASE_ADMIN_URL"))
-        .expect("parse admin url")
-        .options([("search_path", "public")]);
-    let admin = PgPoolOptions::new()
-        .max_connections(4)
-        .connect_with(admin_options)
-        .await
-        .expect("connect as admin");
-    MIGRATED
-        .get_or_init(|| async {
-            sqlx::migrate!("./migrations")
-                .run(&admin)
-                .await
-                .expect("run migrations");
-        })
-        .await;
-
-    let pool = PgPoolOptions::new()
-        .max_connections(12)
-        .connect(&env("ATLAS_TEST_DATABASE_URL"))
-        .await
-        .expect("connect as atlas_api");
-    let app = api_router(AppState {
+pub fn build_router(pool: PgPool) -> Router {
+    let state = AppState {
         pool,
         email: Arc::new(LogEmailProvider),
         jwt_secret: Arc::new(JWT_SECRET.to_vec()),
-    });
-
-    let tenant_id = Uuid::now_v7();
-    let owner_id = new_user(&admin).await;
-    sqlx::query("INSERT INTO atlas.tenants (id, name, status, created_by_user_id) VALUES ($1, 'Test Tenant', 'active', $2)")
-        .bind(tenant_id)
-        .bind(owner_id)
-        .execute(&admin)
-        .await
-        .unwrap();
-    grant(
-        &admin,
-        owner_id,
-        OWNER_ROLE_ID,
-        "tenant",
-        Some(tenant_id),
-        None,
-        owner_id,
-    )
-    .await;
-
-    let token = token_for(owner_id, tenant_id);
-    World {
-        app,
-        admin,
-        tenant_id,
-        owner_id,
-        token,
-        stores: [Uuid::nil(); 3],
-        shifts: [Uuid::nil(); 3],
-        rice: Uuid::nil(),
-        piece_unit: Uuid::nil(),
-    }
+        rate_limiter: RateLimiter::with_limits(1000, std::time::Duration::from_secs(60)),
+    };
+    return api_router(state);
 }
 
-/**
- * `bare_world` plus three stores with open shifts, a piece unit and rice
- * priced at 150000 minor units per piece, inserted directly with SQL.
- */
-pub async fn world() -> World {
-    let mut world = bare_world().await;
-    let admin = world.admin.clone();
-    let tenant_id = world.tenant_id;
-    let owner_id = world.owner_id;
-
-    let mut stores = [Uuid::nil(); 3];
-    let mut shifts = [Uuid::nil(); 3];
-    for (i, name) in ["Location One", "Location Two", "Location Three"]
-        .iter()
-        .enumerate()
-    {
-        stores[i] = Uuid::now_v7();
-        sqlx::query("INSERT INTO atlas.stores (id, tenant_id, name, slug) VALUES ($1, $2, $3, $4)")
-            .bind(stores[i])
-            .bind(tenant_id)
-            .bind(name)
-            .bind(format!("location-{}", i + 1))
-            .execute(&admin)
-            .await
-            .unwrap();
-        shifts[i] = Uuid::now_v7();
-        sqlx::query("INSERT INTO atlas.shifts (id, tenant_id, store_id, opened_by_user_id) VALUES ($1, $2, $3, $4)")
-            .bind(shifts[i])
-            .bind(tenant_id)
-            .bind(stores[i])
-            .bind(owner_id)
-            .execute(&admin)
-            .await
-            .unwrap();
-    }
-
-    let piece_unit = new_unit(&admin, tenant_id, "piece").await;
-    let product_type = Uuid::now_v7();
-    sqlx::query("INSERT INTO atlas.product_types (id, tenant_id, name) VALUES ($1, $2, 'Grocery')")
-        .bind(product_type)
-        .bind(tenant_id)
-        .execute(&admin)
-        .await
-        .unwrap();
-
-    let rice = new_product(&admin, tenant_id, product_type, piece_unit, "Rice", 150_000).await;
-    world.stores = stores;
-    world.shifts = shifts;
-    world.rice = rice;
-    world.piece_unit = piece_unit;
-    world
+pub struct Caller<'a> {
+    pub token: &'a str,
+    pub store_id: Option<&'a str>,
 }
 
-pub fn token_for(user_id: Uuid, tenant_id: Uuid) -> String {
-    issue_access_token(user_id, tenant_id, JWT_SECRET).expect("issue token")
+pub fn as_user(token: &str) -> Caller<'_> {
+    return Caller { token, store_id: None };
 }
 
-async fn new_user(admin: &PgPool) -> Uuid {
-    let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO atlas.users (id, full_name, email, password_hash) VALUES ($1, 'Test User', $2, 'x')")
-        .bind(id)
-        .bind(format!("{id}@test.local"))
-        .execute(admin)
-        .await
-        .unwrap();
-    id
+pub fn at_store<'a>(token: &'a str, store_id: &'a str) -> Caller<'a> {
+    return Caller { token, store_id: Some(store_id) };
 }
 
-async fn grant(
-    admin: &PgPool,
-    user_id: Uuid,
-    role_id: &str,
-    scope: &str,
-    tenant_id: Option<Uuid>,
-    store_id: Option<Uuid>,
-    granted_by: Uuid,
-) {
-    sqlx::query(
-        "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, store_id, status, granted_by_user_id)
-         VALUES ($1, $2, $3::uuid, $4::atlas.role_scope, $5, $6, 'active', $7)",
-    )
-    .bind(Uuid::now_v7())
-    .bind(user_id)
-    .bind(role_id)
-    .bind(scope)
-    .bind(tenant_id)
-    .bind(store_id)
-    .bind(granted_by)
-    .execute(admin)
-    .await
-    .unwrap();
-}
-
-/** A cashier whose only grant is at one store. Returns their token. */
-pub async fn store_cashier(world: &World, store_id: Uuid) -> String {
-    store_user(world, store_id, CASHIER_ROLE_ID).await
-}
-
-/** A user holding `role_id` at one store only. Returns their token. */
-pub async fn store_user(world: &World, store_id: Uuid, role_id: &str) -> String {
-    let user_id = new_user(&world.admin).await;
-    grant(
-        &world.admin,
-        user_id,
-        role_id,
-        "store",
-        Some(world.tenant_id),
-        Some(store_id),
-        world.owner_id,
-    )
-    .await;
-    token_for(user_id, world.tenant_id)
-}
-
-pub async fn new_unit(admin: &PgPool, tenant_id: Uuid, name: &str) -> Uuid {
-    let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO atlas.units_of_measure (id, tenant_id, name, abbreviation) VALUES ($1, $2, $3, $3)")
-        .bind(id)
-        .bind(tenant_id)
-        .bind(name)
-        .execute(admin)
-        .await
-        .unwrap();
-    id
-}
-
-/** Inserts a product with a tenant-wide price rule (minor units per base unit). */
-pub async fn new_product(
-    admin: &PgPool,
-    tenant_id: Uuid,
-    product_type_id: Uuid,
-    base_unit_id: Uuid,
-    name: &str,
-    price_minor: i64,
-) -> Uuid {
-    let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO atlas.products (id, tenant_id, product_type_id, base_unit_id, name) VALUES ($1, $2, $3, $4, $5)")
-        .bind(id)
-        .bind(tenant_id)
-        .bind(product_type_id)
-        .bind(base_unit_id)
-        .bind(name)
-        .execute(admin)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO atlas.price_rules (id, tenant_id, product_id, unit_price_amount_minor) VALUES ($1, $2, $3, $4)")
-        .bind(Uuid::now_v7())
-        .bind(tenant_id)
-        .bind(id)
-        .bind(price_minor)
-        .execute(admin)
-        .await
-        .unwrap();
-    id
-}
-
-// === Requests
-
-pub async fn send(
-    app: &Router,
-    method: Method,
-    uri: &str,
-    token: &str,
-    body: Option<Value>,
-) -> (StatusCode, Value) {
-    let mut request = Request::builder()
+pub async fn call(router: &Router, method: &str, path: &str, caller: Option<&Caller<'_>>, body: Option<Value>) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
         .method(method)
-        .uri(uri)
-        .header("authorization", format!("Bearer {token}"));
-    let body = match body {
-        Some(value) => {
-            request = request.header("content-type", "application/json");
-            Body::from(value.to_string())
+        .uri(path)
+        .header("content-type", "application/json")
+        .header("x-client-type", "app");
+    if let Some(caller) = caller {
+        builder = builder.header("authorization", format!("Bearer {}", caller.token));
+        if let Some(store_id) = caller.store_id {
+            builder = builder.header("x-store-id", store_id);
         }
+    }
+    let body = match body {
+        Some(value) => Body::from(serde_json::to_vec(&value).unwrap()),
         None => Body::empty(),
     };
-    let response = app
-        .clone()
-        .oneshot(request.body(body).unwrap())
-        .await
-        .unwrap();
+    let mut request = builder.body(body).unwrap();
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+
+    let response = router.clone().oneshot(request).await.unwrap();
     let status = response.status();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-    (status, value)
+    let json: Value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).to_string()))
+    };
+    return (status, json);
 }
 
-impl World {
-    pub async fn get(&self, uri: &str) -> (StatusCode, Value) {
-        send(&self.app, Method::GET, uri, &self.token, None).await
-    }
-
-    pub async fn patch(&self, uri: &str, body: Value) -> (StatusCode, Value) {
-        send(&self.app, Method::PATCH, uri, &self.token, Some(body)).await
-    }
-
-    pub async fn delete(&self, uri: &str) -> (StatusCode, Value) {
-        send(&self.app, Method::DELETE, uri, &self.token, None).await
-    }
-
-    pub async fn post(&self, uri: &str, body: Value) -> (StatusCode, Value) {
-        send(&self.app, Method::POST, uri, &self.token, Some(body)).await
-    }
-
-    /// Adds `product` to `store` with starting stock through the real endpoint.
-    pub async fn seed_stock(&self, store: Uuid, product: Uuid, quantity: i64) {
-        let (status, body) = self
-            .post(
-                "/api/v1/stock/inventory",
-                json!({ "store_id": store, "product_id": product, "quantity": quantity }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "seed stock failed: {body}");
-    }
-
-    /// Rice at the three stores: 50 / 30 / 20.
-    pub async fn seed_rice(&self) {
-        for (store, quantity) in self.stores.iter().zip([50, 30, 20]) {
-            self.seed_stock(*store, self.rice, quantity).await;
-        }
-    }
-
-    pub async fn sell(
-        &self,
-        store_index: usize,
-        product: Uuid,
-        quantity: i64,
-    ) -> (StatusCode, Value) {
-        self.sell_lines(store_index, &[(product, quantity)]).await
-    }
-
-    pub async fn sell_lines(
-        &self,
-        store_index: usize,
-        lines: &[(Uuid, i64)],
-    ) -> (StatusCode, Value) {
-        self.post("/api/v1/sales", self.sale_body(store_index, lines))
-            .await
-    }
-
-    pub fn sale_body(&self, store_index: usize, lines: &[(Uuid, i64)]) -> Value {
-        // `unit_price_amount_minor: 1` is deliberate: the server must ignore it.
-        json!({
-            "id": Uuid::now_v7(),
-            "store_id": self.stores[store_index],
-            "shift_id": self.shifts[store_index],
-            "device_id": "till-1",
-            "lines": lines.iter().map(|(product, quantity)| json!({
-                "product_id": product,
-                "unit_id": self.piece_unit,
-                "quantity": quantity,
-                "unit_price_amount_minor": 1,
-            })).collect::<Vec<_>>(),
-        })
-    }
-
-    pub fn transfer_body(&self, from: usize, to: usize, quantity: i64) -> Value {
-        json!({
-            "from_store_id": self.stores[from],
-            "to_store_id": self.stores[to],
-            "product_id": self.rice,
-            "quantity": quantity,
-            "reason": "Rebalancing",
-        })
-    }
-
-    /// On-hand for a product at a store, read from the API.
-    pub async fn on_hand(&self, store_index: usize, product: Uuid) -> Decimal {
-        let uri = format!(
-            "/api/v1/stock/on-hand?store_id={}&product_id={product}",
-            self.stores[store_index]
-        );
-        let (status, body) = self.get(&uri).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        body["data"]
-            .as_array()
-            .unwrap()
-            .first()
-            .map(|row| dec(&row["on_hand"]))
-            .unwrap_or(Decimal::ZERO)
-    }
-
-    /// Product total across stores, read from the API.
-    pub async fn total(&self, product: Uuid) -> Decimal {
-        let (status, body) = self.get(&format!("/api/v1/stock/products/{product}")).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        dec(&body["data"]["total_quantity"])
-    }
-
-    // == Raw table counts, straight from the database
-
-    pub async fn count(&self, table: &str) -> i64 {
-        sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM atlas.{table} WHERE tenant_id = $1"
-        ))
-        .bind(self.tenant_id)
-        .fetch_one(&self.admin)
-        .await
-        .unwrap()
-    }
-
-    pub async fn count_movements(&self, movement_type: &str) -> i64 {
-        sqlx::query_scalar("SELECT count(*) FROM atlas.stock_movements WHERE tenant_id = $1 AND movement_type = $2::atlas.stock_movement_type")
-            .bind(self.tenant_id)
-            .bind(movement_type)
-            .fetch_one(&self.admin)
-            .await
-            .unwrap()
-    }
-}
-
-// === Raw requests
-
-/**
- * Like `send`, but the caller controls the exact body and content type, to
- * exercise malformed input that `serde_json::Value` cannot express.
- */
-pub async fn send_raw(
-    app: &Router,
-    method: Method,
-    uri: &str,
+/// Like `call`, but the caller controls the exact body bytes and content type, to exercise input that `serde_json::Value` cannot express. Returns the status, the response content type and the raw body.
+pub async fn call_raw(
+    router: &Router,
+    method: &str,
+    path: &str,
     token: Option<&str>,
     content_type: Option<&str>,
     body: &str,
 ) -> (StatusCode, Option<String>, Vec<u8>) {
-    let mut request = Request::builder().method(method).uri(uri);
+    let mut builder = Request::builder().method(method).uri(path);
     if let Some(token) = token {
-        request = request.header("authorization", format!("Bearer {token}"));
+        builder = builder.header("authorization", format!("Bearer {}", token));
     }
     if let Some(content_type) = content_type {
-        request = request.header("content-type", content_type);
+        builder = builder.header("content-type", content_type);
     }
-    let response = app
-        .clone()
-        .oneshot(request.body(Body::from(body.to_string())).unwrap())
-        .await
-        .unwrap();
+    let mut request = builder.body(Body::from(body.to_string())).unwrap();
+    request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+    let response = router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .map(|value| value.to_str().unwrap().to_string());
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes()
-        .to_vec();
-    (status, content_type, bytes)
+    let content_type = response.headers().get("content-type").map(|v| v.to_str().unwrap().to_string());
+    let bytes = response.into_body().collect().await.unwrap().to_bytes().to_vec();
+    return (status, content_type, bytes);
 }
 
-impl World {
-    /**
-     * Every stock balance must equal the sum of its ledger rows. Called at
-     * the end of tests that mix operations, to catch the two drifting.
-     */
-    pub async fn assert_ledger_matches_balances(&self) {
-        let drifted: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM atlas.stock_levels sl
-             WHERE sl.tenant_id = $1
-               AND sl.quantity <> (SELECT COALESCE(SUM(m.quantity), 0) FROM atlas.stock_movements m
-                                   WHERE m.store_id = sl.store_id AND m.product_id = sl.product_id)",
-        )
-        .bind(self.tenant_id)
-        .fetch_one(&self.admin)
+pub async fn post(router: &Router, path: &str, caller: &Caller<'_>, body: Value) -> (StatusCode, Value) {
+    return call(router, "POST", path, Some(caller), Some(body)).await;
+}
+
+pub async fn get(router: &Router, path: &str, caller: &Caller<'_>) -> (StatusCode, Value) {
+    return call(router, "GET", path, Some(caller), None).await;
+}
+
+pub async fn patch(router: &Router, path: &str, caller: &Caller<'_>, body: Value) -> (StatusCode, Value) {
+    return call(router, "PATCH", path, Some(caller), Some(body)).await;
+}
+
+pub async fn delete(router: &Router, path: &str, caller: &Caller<'_>) -> (StatusCode, Value) {
+    return call(router, "DELETE", path, Some(caller), None).await;
+}
+
+pub fn id_of(body: &Value) -> String {
+    return body["data"]["id"].as_str().unwrap_or_else(|| panic!("no data.id in {}", body)).to_string();
+}
+
+// === Identity
+
+/**
+ * Signs up a fresh owner with their own tenant and activates them directly in SQL, the same shortcut `commerce_tests.rs` takes.
+ * Returns (access_token, tenant_id).
+ */
+pub async fn signup_owner(router: &Router, pool: &PgPool, email: &str) -> (String, Uuid) {
+    let (status, _) = call(
+        router,
+        "POST",
+        "/api/v1/auth/signup",
+        None,
+        Some(json!({
+            "full_name": "Test Owner",
+            "email": email,
+            "phone": "+2340000000000",
+            "password": "a-fairly-strong-password",
+            "tenant_name": "Test Tenant",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    sqlx::query("UPDATE atlas.users SET is_email_verified = true WHERE email = $1")
+        .bind(email)
+        .execute(pool)
         .await
         .unwrap();
-        assert_eq!(drifted, 0, "stock_levels drifted from stock_movements");
-    }
+    sqlx::query(
+        "UPDATE atlas.role_grants SET status = 'active'
+         WHERE user_id = (SELECT id FROM atlas.users WHERE email = $1) AND status = 'pending'",
+    )
+    .bind(email)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let (status, body) = call(
+        router,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "a-fairly-strong-password" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let token = body["data"]["access_token"].as_str().unwrap().to_string();
+    let tenant_id = Uuid::parse_str(body["data"]["tenant_id"].as_str().unwrap()).unwrap();
+    return (token, tenant_id);
 }
 
-// === Helpers
-
-pub fn dec(value: &Value) -> Decimal {
-    match value {
-        Value::String(text) => Decimal::from_str(text).unwrap(),
-        Value::Number(number) => Decimal::from_str(&number.to_string()).unwrap(),
-        other => panic!("not a decimal: {other}"),
-    }
+#[derive(serde::Serialize)]
+struct TestClaims {
+    sub: Uuid,
+    tenant_id: Uuid,
+    exp: usize,
 }
 
-pub fn d(value: i64) -> Decimal {
-    Decimal::from(value)
+pub fn issue_token(user_id: Uuid, tenant_id: Uuid) -> String {
+    let claims = TestClaims {
+        sub: user_id,
+        tenant_id,
+        exp: (chrono::Utc::now() + chrono::Duration::minutes(15)).timestamp() as usize,
+    };
+    return jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(JWT_SECRET),
+    )
+    .unwrap();
+}
+
+/// A staff member holding one seeded system role (`cashier`, `store_manager`, ...) scoped to a single store. Returns (user_id, access_token).
+pub async fn seed_staff(pool: &PgPool, tenant_id: Uuid, store_id: Uuid, role_name: &str) -> (Uuid, String) {
+    let user_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atlas.users (id, full_name, email, password_hash, is_email_verified)
+         VALUES ($1, $2, $3, 'not-a-real-hash', true)",
+    )
+    .bind(user_id)
+    .bind(format!("Staff {}", role_name))
+    .bind(format!("{}-{}@example.com", role_name, user_id))
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, store_id, status, granted_by_user_id)
+         SELECT $1, $2, r.id, 'store', $3, $4, 'active', $2
+         FROM atlas.roles r WHERE r.is_system AND r.name = $5",
+    )
+    .bind(Uuid::now_v7())
+    .bind(user_id)
+    .bind(tenant_id)
+    .bind(store_id)
+    .bind(role_name)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    return (user_id, issue_token(user_id, tenant_id));
+}
+
+// === Catalogue fixtures
+
+pub async fn create_store(router: &Router, token: &str, slug: &str) -> Uuid {
+    let (status, body) = post(router, "/api/v1/stores", &as_user(token), json!({ "name": format!("Store {}", slug), "slug": slug })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+pub async fn seed_unit(pool: &PgPool, tenant_id: Uuid, name: &str, abbreviation: &str) -> Uuid {
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO atlas.units_of_measure (id, tenant_id, name, abbreviation) VALUES ($1, $2, $3, $4)")
+        .bind(id)
+        .bind(tenant_id)
+        .bind(name)
+        .bind(abbreviation)
+        .execute(pool)
+        .await
+        .unwrap();
+    return id;
+}
+
+pub async fn create_product(router: &Router, token: &str, base_unit_id: Uuid, name: &str, sku: &str) -> Uuid {
+    let (status, product_type_body) = post(router, "/api/v1/product-types", &as_user(token), json!({ "name": format!("Type {}", sku) })).await;
+    assert_eq!(status, StatusCode::OK, "{}", product_type_body);
+    let product_type_id = id_of(&product_type_body);
+
+    let (status, body) = post(
+        router,
+        "/api/v1/products",
+        &as_user(token),
+        json!({
+            "product_type_id": product_type_id,
+            "base_unit_id": base_unit_id.to_string(),
+            "name": name,
+            "sku": sku,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+// === Stock fixtures
+
+/// Puts `quantity` base units on hand through the real adjustment endpoint (so it goes through the inventory service).
+pub async fn stock_up(router: &Router, token: &str, store_id: Uuid, product_id: Uuid, quantity: &str) {
+    let (status, body) = post(
+        router,
+        "/api/v1/stock/adjustments",
+        &as_user(token),
+        json!({
+            "store_id": store_id,
+            "product_id": product_id,
+            "stock_item_id": null,
+            "quantity": quantity,
+            "reason": "Opening count",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+pub async fn on_hand(router: &Router, token: &str, store_id: Uuid, product_id: Uuid) -> String {
+    let (status, body) = get(router, &format!("/api/v1/stock/on-hand?store_id={}", store_id), &as_user(token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|level| level["product_id"] == product_id.to_string())
+        .map(|level| level["on_hand"].as_str().unwrap().to_string())
+        .unwrap_or_else(|| "0".to_string());
+}
+
+// === Selling fixtures
+
+pub async fn list_at(router: &Router, token: &str, product_id: Uuid, store_id: Uuid) {
+    let (status, body) = call(
+        router,
+        "PUT",
+        &format!("/api/v1/products/{}/listings/{}", product_id, store_id),
+        Some(&as_user(token)),
+        Some(json!({ "cost_amount_minor": null, "low_stock_threshold": null, "is_active": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+/// A price rule per base unit; `store_id: None` applies at every store.
+pub async fn price_rule(router: &Router, token: &str, product_id: Uuid, store_id: Option<Uuid>, amount_minor: i64) -> Uuid {
+    let (status, body) = post(
+        router,
+        &format!("/api/v1/products/{}/price-rules", product_id),
+        &as_user(token),
+        json!({ "store_id": store_id, "unit_price_amount_minor": amount_minor }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+pub async fn sale_unit(router: &Router, token: &str, product_id: Uuid, unit_id: Uuid, factor: &str) {
+    let (status, body) = post(
+        router,
+        &format!("/api/v1/products/{}/sale-units", product_id),
+        &as_user(token),
+        json!({ "unit_id": unit_id, "factor_to_base": factor }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+pub async fn barcode(router: &Router, token: &str, product_id: Uuid, unit_id: Option<Uuid>, code: &str) {
+    let (status, body) = post(
+        router,
+        &format!("/api/v1/products/{}/barcodes", product_id),
+        &as_user(token),
+        json!({ "barcode": code, "unit_id": unit_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+pub async fn tax_rate(router: &Router, token: &str, name: &str, basis_points: i32) -> Uuid {
+    let (status, body) = post(router, "/api/v1/tax-rates", &as_user(token), json!({ "name": name, "rate_basis_points": basis_points })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+pub async fn store_settings(router: &Router, token: &str, store_id: Uuid, settings: Value) {
+    let (status, body) = patch(router, &format!("/api/v1/stores/{}/settings", store_id), &as_user(token), settings).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+/// A sellable product: created, listed at `store_id`, priced per base unit, with `stock` on hand.
+#[allow(clippy::too_many_arguments)]
+pub async fn sellable(
+    router: &Router,
+    token: &str,
+    store_id: Uuid,
+    unit_id: Uuid,
+    name: &str,
+    sku: &str,
+    price_minor: i64,
+    stock: &str,
+) -> Uuid {
+    let product_id = create_product(router, token, unit_id, name, sku).await;
+    list_at(router, token, product_id, store_id).await;
+    price_rule(router, token, product_id, None, price_minor).await;
+    if stock != "0" {
+        stock_up(router, token, store_id, product_id, stock).await;
+    }
+    return product_id;
+}
+
+// === Sale fixtures
+
+pub async fn open_shift(router: &Router, token: &str, store_id: Uuid) -> Uuid {
+    let (status, body) = post(router, "/api/v1/shifts", &as_user(token), json!({ "store_id": store_id, "opening_cash_amount_minor": 0 })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return Uuid::parse_str(&id_of(&body)).unwrap();
+}
+
+/// The id of one of the tenant's payment methods by code (`cash`, `card`, `transfer`, `store_credit`).
+pub async fn method_id(router: &Router, token: &str, code: &str) -> Uuid {
+    let (status, body) = get(router, "/api/v1/payment-methods", &as_user(token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let id = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["code"] == code)
+        .unwrap_or_else(|| panic!("no payment method {}", code))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    return Uuid::parse_str(&id).unwrap();
+}
+
+pub fn cart_line(product_id: Uuid, unit_id: Uuid, quantity: &str) -> Value {
+    return json!({ "product_id": product_id, "unit_id": unit_id, "quantity": quantity });
+}
+
+pub fn pay(method_id: Uuid, amount_minor: i64) -> Value {
+    return json!({ "id": Uuid::now_v7(), "payment_method_id": method_id, "amount_minor": amount_minor });
+}
+
+/// A sale request body with a fresh client id; tweak the returned JSON for anything unusual.
+pub fn sale_request(store_id: Uuid, shift_id: Uuid, lines: Vec<Value>, payments: Vec<Value>) -> Value {
+    return json!({
+        "id": Uuid::now_v7(),
+        "store_id": store_id,
+        "shift_id": shift_id,
+        "customer_id": null,
+        "device_id": "till-1",
+        "lines": lines,
+        "payments": payments,
+    });
 }

@@ -69,7 +69,7 @@ Commit messages use a `<prefix>: <description>` format, based on [Conventional C
 ### Examples
 
 ```
-feat: scaffold atlas-marketing as a Nuxt 4 app
+feat: scaffold atlas-web as a Nuxt 4 app
 fix: correct tenant resolution in atlas-backend's TenantTx
 chore: wire GitHub and Postgres MCP servers
 refactor: convert atlas-ui packages to Vue peer deps
@@ -97,7 +97,7 @@ The "staged only" instruction matters: a working tree often has more in progress
   - What changed and why (the motivation, not just a restatement of the diff).
   - Any tradeoffs or follow-up work that was deliberately left out of scope.
   - A test plan: what was checked manually, and whether any automated tests were added or updated.
-- **Screenshots or a short clip** are expected for any visual or UI change (`atlas-marketing`, `atlas-ui`, `landing-page`).
+- **Screenshots or a short clip** are expected for any visual or UI change (`atlas-web`, `atlas-pos`, `atlas-ui`).
 - **Base branch**: `feature/`, `fix/`, `refactor/`, `chore/`, `release/`, `conflict/` branches target `develop` unless the change is a `hotfix/`, which targets `main` directly.
 - **Before opening a PR**, make sure `pnpm lint` and the relevant `pnpm build:*` script both pass locally.
 - **Merging**: prefer squash merges so `main`/`develop` history stays one commit per PR, matching the commit message rules above.
@@ -161,12 +161,13 @@ If a hook rejects your commit or push, fix the underlying issue rather than bypa
 
 Beyond commit and branch conventions, code itself follows the project's existing patterns:
 
-- **`atlas-marketing`, `landing-page`, `atlas-web`**: Nuxt 4 apps. Match the `app/{components,composables,layouts,pages,plugins,utils,models,types}` structure, Tailwind v4 via `@tailwindcss/vite`, Pinia for client state.
-- **`atlas-ui/{core,web,app}`, `atlas-ui/{core,web,app}`**: Vue component packages (`@atlas/ui-app`/`@atlasui-app` for Ionic/mobile, `@atlas/ui-web`/`@atlasui-web` for shadcn-vue/reka-ui based web components), built with `tsup`.
-- **`atlas-backend`, `atlas-backend`**: Rust (Axum), each its own Cargo workspace member, not Nx-native.
-- `atlas-*` paths are reference code being retired incrementally as Atlas gets its own equivalent - see the README's "Why `atlas-*` is still here". Don't add new Klassivox-product features there; that product has its own separate repository.
+- **`atlas-web`**: Nuxt 4. Match `app/{components,composables,layouts,pages,middleware}` plus `server/` for the Nitro proxy. Tailwind v4 via `@tailwindcss/vite`. Pinia is available for client state.
+- **`atlas-pos`**: Ionic Vue + Capacitor. Auth tokens stay in memory.
+- **`packages/atlas-ui/{core,web,app}`**: Vue component packages, built with `tsup`.
+- **`atlas-backend`**: Rust (Axum), its own Cargo workspace member.
+- New feature work goes in `atlas-backend`, `atlas-web`, and `atlas-pos`.
 - No `any` in TypeScript except at genuinely unavoidable boundaries (documented inline when used).
-- Always annotate state explicitly (`ref<boolean>(false)`, not `ref(false)`), even when TypeScript could infer it - see `docs/repo/CONTEXT.md`'s "State typing" entry for the full rule and reasoning.
+- Always annotate state explicitly (`ref<boolean>(false)`, not `ref(false)`), even when TypeScript could infer it.
 - Run `pnpm format` before committing if you are unsure whether Prettier will change your files (`lint-staged` also does this automatically on commit).
 
 ---

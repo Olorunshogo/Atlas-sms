@@ -64,7 +64,57 @@ pub struct SessionData {
 
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
+    /**
+     * Required for `X-Client-Type: app`, which has no cookie.
+     * Web sends an empty body. The handler reads the refresh cookie instead.
+     */
+    #[serde(default)]
     pub refresh_token: String,
+}
+
+// === Tenant choice
+
+/**
+ * A tenant the caller can log into or switch to.
+ * Returned with `TENANT_REQUIRED` and `PLATFORM_TENANT_REQUIRED`, and on `GET /auth/me`.
+ */
+#[derive(Debug, Serialize)]
+pub struct TenantChoice {
+    pub id: Uuid,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TenantChoiceList {
+    pub tenants: Vec<TenantChoice>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChoiceErrorBody {
+    pub message: String,
+    pub success: bool,
+    pub code: &'static str,
+    pub data: TenantChoiceList,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionProfile {
+    pub user: AuthenticatedUser,
+    pub tenant_id: Uuid,
+    pub is_platform_admin: bool,
+    pub tenants: Vec<TenantChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlatformInviteRequest {
+    pub email: String,
+}
+
+// === Switch tenant
+
+#[derive(Debug, Deserialize)]
+pub struct SwitchTenantRequest {
+    pub tenant_id: Uuid,
 }
 
 // === Accept invite
