@@ -62,6 +62,8 @@ Profiles, purchase history, store credit, loyalty where the store wants it.
 ### Money
 Daily takings per store, expenses, profit per store, profit per product, comparisons across branches.
 
+**Refunds are recorded, not paid.** A return or a void works out and stores how much the customer is owed (`sale_returns.refund_amount_minor`, and the sale total for a void), but nothing pays that money back, because there is no payment system yet. The amount is inferred from the sale until the payment system is implemented, and how it is paid out (cash from the till, a card reversal, store credit) is not decided here. When payments land, a refund should become a payment-system action that references the return, rather than a second source of truth for the amount.
+
 ### Audit
 Who changed what, when, from which device. In a system handling stock and cash this is not optional and it is not a later feature.
 

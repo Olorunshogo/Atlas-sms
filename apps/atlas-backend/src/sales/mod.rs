@@ -1,5 +1,6 @@
 mod handlers;
 mod models;
+mod returns;
 pub mod service;
 
 pub use models::{CreateSaleRequest, Sale};
@@ -18,5 +19,11 @@ pub fn shifts_router() -> Router<AppState> {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(handlers::list).post(handlers::create))
+        .route("/{id}", get(handlers::get))
         .route("/{id}/lines", get(handlers::lines))
+        .route("/{id}/void", post(handlers::void))
+        .route(
+            "/{id}/returns",
+            get(handlers::list_returns).post(handlers::create_return),
+        )
 }

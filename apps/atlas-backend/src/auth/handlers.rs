@@ -1,20 +1,20 @@
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
 use crate::crypto;
 use crate::error::ApiError;
 use crate::extractors::AdminTx;
+use crate::http::{Json, Path};
 use crate::response::ApiEnvelope;
 use crate::state::AppState;
 
 use super::cookies::{self, client_type, ClientType};
 use super::models::{
-    AcceptInviteRequest, AuthenticatedUser, ForgotPasswordRequest, LoginRequest, RefreshRequest, ResetPasswordRequest,
-    SessionData, SignupRequest, SignupResponseData, VerifyEmailRequest,
+    AcceptInviteRequest, AuthenticatedUser, ForgotPasswordRequest, LoginRequest, RefreshRequest,
+    ResetPasswordRequest, SessionData, SignupRequest, SignupResponseData, VerifyEmailRequest,
 };
 use super::{jwt, otp, password};
 
@@ -97,11 +97,21 @@ pub async fn signup(
     .execute(&mut *tx)
     .await?;
 
-    send_otp(&mut tx, &state, user_id, &payload.email, "signup_verification", "Verify your Atlas account").await?;
+    send_otp(
+        &mut tx,
+        &state,
+        user_id,
+        &payload.email,
+        "signup_verification",
+        "Verify your Atlas account",
+    )
+    .await?;
 
     tx.commit().await?;
 
-    let data = SignupResponseData { email: payload.email };
+    let data = SignupResponseData {
+        email: payload.email,
+    };
 
     Ok((
         StatusCode::CREATED,
@@ -120,7 +130,9 @@ fn validate_signup(payload: &SignupRequest) -> Result<(), ApiError> {
         return Err(ApiError::bad_request("a valid email is required"));
     }
     if payload.password.len() < 8 {
-        return Err(ApiError::bad_request("password must be at least 8 characters"));
+        return Err(ApiError::bad_request(
+            "password must be at least 8 characters",
+        ));
     }
     if payload.phone.trim().is_empty() {
         return Err(ApiError::bad_request("phone is required"));
@@ -159,7 +171,11 @@ async fn send_otp(
 
     state
         .email
-        .send(email, subject, &format!("Your verification code is {code}. It expires in 10 minutes."))
+        .send(
+            email,
+            subject,
+            &format!("Your verification code is {code}. It expires in 10 minutes."),
+        )
         .await
         .map_err(|err| ApiError::Internal(err.to_string()))
 }
@@ -183,10 +199,12 @@ pub async fn verify_email(
 
     consume_otp(&mut tx, user_id, "signup_verification", &payload.code).await?;
 
-    sqlx::query("UPDATE atlas.users SET is_email_verified = true, updated_at = now() WHERE id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE atlas.users SET is_email_verified = true, updated_at = now() WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query(
         "UPDATE atlas.role_grants SET status = 'active', updated_at = now()
@@ -206,7 +224,12 @@ pub async fn verify_email(
 /// marks it consumed. Returns the OTP's own id (unused by most callers,
 /// but kept so a future audit trail can reference exactly which code was
 /// spent).
-async fn consume_otp(tx: &mut AdminTx, user_id: Uuid, purpose: &str, code: &str) -> Result<Uuid, ApiError> {
+async fn consume_otp(
+    tx: &mut AdminTx,
+    user_id: Uuid,
+    purpose: &str,
+    code: &str,
+) -> Result<Uuid, ApiError> {
     let otp_row: Option<(Uuid, String)> = sqlx::query_as(
         "SELECT id, code_hash FROM atlas.email_otps
          WHERE user_id = $1 AND purpose = $2
@@ -219,7 +242,8 @@ async fn consume_otp(tx: &mut AdminTx, user_id: Uuid, purpose: &str, code: &str)
     .fetch_optional(&mut **tx)
     .await?;
 
-    let (otp_id, code_hash) = otp_row.ok_or_else(|| ApiError::bad_request("Invalid or expired code."))?;
+    let (otp_id, code_hash) =
+        otp_row.ok_or_else(|| ApiError::bad_request("Invalid or expired code."))?;
 
     if !otp::verify_code(code, &code_hash)? {
         return Err(ApiError::bad_request("Invalid or expired code."));
@@ -264,7 +288,9 @@ pub async fn login(
     }
 
     if !is_email_verified {
-        return Err(ApiError::forbidden("Please verify your email before logging in."));
+        return Err(ApiError::forbidden(
+            "Please verify your email before logging in.",
+        ));
     }
 
     let active_tenant_ids: Vec<Uuid> = sqlx::query_scalar(
@@ -277,7 +303,11 @@ pub async fn login(
 
     let tenant_id = match (payload.tenant_id, active_tenant_ids.as_slice()) {
         (Some(requested), tenants) if tenants.contains(&requested) => requested,
-        (Some(_), _) => return Err(ApiError::forbidden("You have no active role in that tenant.")),
+        (Some(_), _) => {
+            return Err(ApiError::forbidden(
+                "You have no active role in that tenant.",
+            ))
+        }
         (None, [only]) => *only,
         (None, []) => {
             return Err(ApiError::conflict_with_code(
@@ -296,8 +326,19 @@ pub async fn login(
     let (access_token, refresh_token) = issue_session(&mut tx, user_id, tenant_id, &state).await?;
     tx.commit().await?;
 
-    let user = AuthenticatedUser { id: user_id, full_name, email };
-    Ok(session_response(client_type(&headers), "Logged in.", access_token, refresh_token, tenant_id, user))
+    let user = AuthenticatedUser {
+        id: user_id,
+        full_name,
+        email,
+    };
+    Ok(session_response(
+        client_type(&headers),
+        "Logged in.",
+        access_token,
+        refresh_token,
+        tenant_id,
+        user,
+    ))
 }
 
 /// Issues a fresh access JWT and a fresh (stored, hashed) opaque refresh
@@ -343,17 +384,30 @@ fn session_response(
     user: AuthenticatedUser,
 ) -> Response {
     let data = match client {
-        ClientType::Web => SessionData { access_token: None, refresh_token: None, tenant_id, user },
-        ClientType::App => {
-            SessionData { access_token: Some(access_token.clone()), refresh_token: Some(refresh_token.clone()), tenant_id, user }
-        }
+        ClientType::Web => SessionData {
+            access_token: None,
+            refresh_token: None,
+            tenant_id,
+            user,
+        },
+        ClientType::App => SessionData {
+            access_token: Some(access_token.clone()),
+            refresh_token: Some(refresh_token.clone()),
+            tenant_id,
+            user,
+        },
     };
 
     let mut response = Json(ApiEnvelope::ok(message, data)).into_response();
 
     if client == ClientType::Web {
-        let access_cookie = cookies::build_cookie(cookies::ACCESS_TOKEN_COOKIE, &access_token, 15 * 60);
-        let refresh_cookie = cookies::build_cookie(cookies::REFRESH_TOKEN_COOKIE, &refresh_token, 7 * 24 * 60 * 60);
+        let access_cookie =
+            cookies::build_cookie(cookies::ACCESS_TOKEN_COOKIE, &access_token, 15 * 60);
+        let refresh_cookie = cookies::build_cookie(
+            cookies::REFRESH_TOKEN_COOKIE,
+            &refresh_token,
+            7 * 24 * 60 * 60,
+        );
         let response_headers = response.headers_mut();
         response_headers.append(
             header::SET_COOKIE,
@@ -408,10 +462,11 @@ pub async fn refresh(
     let (old_token_id, user_id, tenant_id) =
         row.ok_or_else(|| ApiError::Unauthorized("Invalid or expired refresh token.".to_string()))?;
 
-    let user: (String, String) = sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1")
-        .bind(user_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let user: (String, String) =
+        sqlx::query_as("SELECT full_name, email FROM atlas.users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
     sqlx::query("UPDATE atlas.refresh_tokens SET revoked_at = now() WHERE id = $1")
         .bind(old_token_id)
@@ -421,8 +476,19 @@ pub async fn refresh(
     let (access_token, refresh_token) = issue_session(&mut tx, user_id, tenant_id, &state).await?;
     tx.commit().await?;
 
-    let authenticated_user = AuthenticatedUser { id: user_id, full_name: user.0, email: user.1 };
-    Ok(session_response(client, "Token refreshed.", access_token, refresh_token, tenant_id, authenticated_user))
+    let authenticated_user = AuthenticatedUser {
+        id: user_id,
+        full_name: user.0,
+        email: user.1,
+    };
+    Ok(session_response(
+        client,
+        "Token refreshed.",
+        access_token,
+        refresh_token,
+        tenant_id,
+        authenticated_user,
+    ))
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -473,7 +539,9 @@ pub async fn accept_invite(
         Some(id) => id,
         None => {
             if payload.password.len() < 8 {
-                return Err(ApiError::bad_request("password must be at least 8 characters"));
+                return Err(ApiError::bad_request(
+                    "password must be at least 8 characters",
+                ));
             }
             let user_id = Uuid::now_v7();
             let password_hash = password::hash_password(&payload.password)?;
@@ -494,7 +562,11 @@ pub async fn accept_invite(
         }
     };
 
-    let scope = if store_id.is_some() { "store" } else { "tenant" };
+    let scope = if store_id.is_some() {
+        "store"
+    } else {
+        "tenant"
+    };
 
     sqlx::query(
         "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, store_id, status, granted_by_user_id)
@@ -539,7 +611,15 @@ pub async fn forgot_password(
             .await?;
 
     if let Some(user_id) = user_id {
-        send_otp(&mut tx, &state, user_id, &payload.email, "password_reset", "Reset your Atlas password").await?;
+        send_otp(
+            &mut tx,
+            &state,
+            user_id,
+            &payload.email,
+            "password_reset",
+            "Reset your Atlas password",
+        )
+        .await?;
     }
 
     tx.commit().await?;
@@ -557,16 +637,19 @@ pub async fn reset_password(
     mut tx: AdminTx,
     Json(payload): Json<ResetPasswordRequest>,
 ) -> Result<Json<ApiEnvelope<()>>, ApiError> {
-    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM atlas.users WHERE email = $1 AND deleted_at IS NULL")
-        .bind(&payload.email)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| ApiError::bad_request("Invalid email or code."))?;
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM atlas.users WHERE email = $1 AND deleted_at IS NULL")
+            .bind(&payload.email)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| ApiError::bad_request("Invalid email or code."))?;
 
     consume_otp(&mut tx, user_id, "password_reset", &payload.code).await?;
 
     if payload.new_password.len() < 8 {
-        return Err(ApiError::bad_request("password must be at least 8 characters"));
+        return Err(ApiError::bad_request(
+            "password must be at least 8 characters",
+        ));
     }
 
     let password_hash = password::hash_password(&payload.new_password)?;

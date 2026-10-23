@@ -1,19 +1,13 @@
-use axum::Json;
-use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
+use crate::http::{Json, Path};
 use crate::response::ApiEnvelope;
 use crate::roles;
 
-use super::models::Store;
+use super::models::{CreateStoreRequest, Store, UpdateStoreRequest};
 use super::service;
-
-#[derive(Deserialize)]
-pub struct CreateStoreRequest {
-    pub name: String,
-    pub slug: String,
-}
 
 /// `GET /api/v1/stores`. Lists every store in the caller's tenant -
 /// visibility is tenant-wide by design; per-store role grants gate what a
@@ -36,7 +30,33 @@ pub async fn create(
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "store.create").await?;
-    let store = service::create_store(&mut tx, tenant_id, &body.name, &body.slug).await?;
+    let store = service::create_store(&mut tx, tenant_id, &body).await?;
     tx.commit().await?;
     Ok(Json(ApiEnvelope::ok("Store created.", store)))
+}
+
+/// `GET /api/v1/stores/{id}`. Tenant-wide visibility, like the list.
+pub async fn get(
+    mut tx: TenantTx,
+    Path(store_id): Path<Uuid>,
+) -> Result<Json<ApiEnvelope<Store>>, ApiError> {
+    let store = service::get_store(&mut tx, store_id).await?;
+    tx.commit().await?;
+    Ok(Json(ApiEnvelope::ok("Store fetched.", store)))
+}
+
+/// `PATCH /api/v1/stores/{id}`. Requires `store.update` at that store, so a
+/// store-scoped admin can edit their own branch and no other.
+pub async fn update(
+    mut tx: TenantTx,
+    Path(store_id): Path<Uuid>,
+    Json(body): Json<UpdateStoreRequest>,
+) -> Result<Json<ApiEnvelope<Store>>, ApiError> {
+    let tenant_id = tx.tenant_id;
+    let user_id = tx.user_id;
+    roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(store_id), "store.update")
+        .await?;
+    let store = service::update_store(&mut tx, store_id, &body).await?;
+    tx.commit().await?;
+    Ok(Json(ApiEnvelope::ok("Store updated.", store)))
 }

@@ -21,7 +21,10 @@ pub enum ClientType {
  * forged or missing value is a client receiving a token shape it can't use.
  */
 pub fn client_type(headers: &HeaderMap) -> ClientType {
-    match headers.get("x-client-type").and_then(|value| value.to_str().ok()) {
+    match headers
+        .get("x-client-type")
+        .and_then(|value| value.to_str().ok())
+    {
         Some("app") => ClientType::App,
         _ => ClientType::Web,
     }

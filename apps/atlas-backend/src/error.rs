@@ -26,6 +26,13 @@ pub enum ApiError {
         code: Option<&'static str>,
     },
     Internal(String),
+    /// A request the framework refused before a handler ran (bad JSON, bad
+    /// path, unknown route); keeps the status axum chose.
+    Rejected {
+        status: StatusCode,
+        message: String,
+        code: &'static str,
+    },
 }
 
 impl ApiError {
@@ -40,6 +47,14 @@ impl ApiError {
         Self::Forbidden {
             message: message.into(),
             code: None,
+        }
+    }
+
+    pub fn rejected(status: StatusCode, message: String, code: &'static str) -> Self {
+        Self::Rejected {
+            status,
+            message,
+            code,
         }
     }
 
@@ -74,6 +89,11 @@ impl IntoResponse for ApiError {
             ApiError::Forbidden { message, code } => (StatusCode::FORBIDDEN, message, code),
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
             ApiError::Conflict { message, code } => (StatusCode::CONFLICT, message, code),
+            ApiError::Rejected {
+                status,
+                message,
+                code,
+            } => (status, message, Some(code)),
             ApiError::Internal(message) => {
                 eprintln!("internal error: {message}");
                 (
@@ -96,8 +116,39 @@ impl IntoResponse for ApiError {
     }
 }
 
+/**
+ * Constraint violations are the caller's mistake, not a server fault, so
+ * they become 4xx instead of a blanket 500. The message is generic on
+ * purpose: constraint and column names are database internals.
+ */
 impl From<sqlx::Error> for ApiError {
     fn from(err: sqlx::Error) -> Self {
+        if let sqlx::Error::Database(db_err) = &err {
+            match db_err.code().as_deref() {
+                // unique_violation
+                Some("23505") => {
+                    return ApiError::conflict_with_code(
+                        "A record with these details already exists.",
+                        "ALREADY_EXISTS",
+                    )
+                }
+                // foreign_key_violation
+                Some("23503") => {
+                    return ApiError::bad_request_with_code(
+                        "A referenced record does not exist.",
+                        "INVALID_REFERENCE",
+                    )
+                }
+                // check_violation
+                Some("23514") => {
+                    return ApiError::bad_request_with_code(
+                        "A value is out of the allowed range.",
+                        "INVALID_VALUE",
+                    )
+                }
+                _ => {}
+            }
+        }
         ApiError::Internal(err.to_string())
     }
 }

@@ -11,7 +11,10 @@ pub enum InviteOutcome {
     GrantedExisting,
     /// Carries the raw (unhashed) token - only ever handed to the caller
     /// once, to put in an email link. Never stored or logged as-is.
-    CreatedInvite { token: String, email: String },
+    CreatedInvite {
+        token: String,
+        email: String,
+    },
 }
 
 pub async fn list_roles(conn: &mut PgConnection, tenant_id: Uuid) -> Result<Vec<Role>, ApiError> {
@@ -139,9 +142,12 @@ pub async fn assert_grantable(
             .await?
             .ok_or_else(|| ApiError::bad_request("Unknown role."))?;
 
-    let granter_permissions = effective_permissions(conn, granter_user_id, tenant_id, store_id).await?;
+    let granter_permissions =
+        effective_permissions(conn, granter_user_id, tenant_id, store_id).await?;
 
-    let ungranted = target_permissions.iter().find(|permission| !granter_permissions.contains(permission));
+    let ungranted = target_permissions
+        .iter()
+        .find(|permission| !granter_permissions.contains(permission));
 
     match ungranted {
         None => Ok(()),
@@ -169,7 +175,11 @@ pub async fn invite(
     email: &str,
     invited_by_user_id: Uuid,
 ) -> Result<InviteOutcome, ApiError> {
-    let scope = if store_id.is_some() { "store" } else { "tenant" };
+    let scope = if store_id.is_some() {
+        "store"
+    } else {
+        "tenant"
+    };
 
     let existing_user_id: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM atlas.users WHERE email = $1 AND deleted_at IS NULL")
@@ -215,5 +225,8 @@ pub async fn invite(
     .execute(conn)
     .await?;
 
-    Ok(InviteOutcome::CreatedInvite { token, email: email.to_string() })
+    Ok(InviteOutcome::CreatedInvite {
+        token,
+        email: email.to_string(),
+    })
 }

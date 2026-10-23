@@ -5,7 +5,7 @@ mod models;
 mod otp;
 mod password;
 
-pub use jwt::{decode_access_token, Claims};
+pub use jwt::{decode_access_token, issue_access_token, Claims};
 
 use axum::routing::post;
 use axum::Router;

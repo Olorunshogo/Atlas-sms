@@ -19,7 +19,18 @@
  * app.bypass_tenant = 'on' is the platform-role escape hatch (AdminTx),
  * set only after a platform_admin check has already passed in app code.
  */
-CREATE ROLE atlas_app NOLOGIN;
+/*
+ * Roles are cluster-wide, not per database, so a second database on the same
+ * Postgres server (a test database, a scratch copy) would otherwise fail
+ * here with "role already exists".
+ */
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'atlas_app') THEN
+        CREATE ROLE atlas_app NOLOGIN;
+    END IF;
+END
+$$;
 
 GRANT USAGE ON SCHEMA atlas TO atlas_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA atlas TO atlas_app;

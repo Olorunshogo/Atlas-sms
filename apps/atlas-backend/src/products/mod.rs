@@ -14,9 +14,22 @@ pub fn product_types_router() -> Router<AppState> {
     )
 }
 
+pub fn units_router() -> Router<AppState> {
+    Router::new().route("/", get(handlers::list_units).post(handlers::create_unit))
+}
+
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/",
-        get(handlers::list_products).post(handlers::create_product),
-    )
+    Router::new()
+        .route(
+            "/",
+            get(handlers::list_products).post(handlers::create_product),
+        )
+        .route(
+            "/{product_id}",
+            get(handlers::get_product).patch(handlers::update_product),
+        )
+        .route(
+            "/{product_id}/sale-units",
+            get(handlers::list_sale_units).post(handlers::create_sale_unit),
+        )
 }

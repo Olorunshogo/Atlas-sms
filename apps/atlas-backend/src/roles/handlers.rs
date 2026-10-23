@@ -1,8 +1,8 @@
 use axum::extract::State;
-use axum::Json;
 
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
+use crate::http::Json;
 use crate::response::ApiEnvelope;
 use crate::state::AppState;
 
@@ -38,7 +38,15 @@ pub async fn invite(
     service::assert_permission(&mut tx, user_id, tenant_id, body.store_id, "staff.invite").await?;
     service::assert_grantable(&mut tx, user_id, tenant_id, body.store_id, body.role_id).await?;
 
-    let outcome = service::invite(&mut tx, tenant_id, body.store_id, body.role_id, &body.email, user_id).await?;
+    let outcome = service::invite(
+        &mut tx,
+        tenant_id,
+        body.store_id,
+        body.role_id,
+        &body.email,
+        user_id,
+    )
+    .await?;
 
     let data = match outcome {
         InviteOutcome::GrantedExisting => {

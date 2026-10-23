@@ -6,9 +6,12 @@ use sqlx::PgPool;
 
 mod auth;
 mod crypto;
+mod customers;
 mod email;
 mod error;
 mod extractors;
+mod http;
+mod pricing;
 mod products;
 mod response;
 mod roles;
@@ -18,7 +21,9 @@ mod stock;
 mod stores;
 mod sync;
 mod tenants;
+mod validate;
 
+pub use auth::issue_access_token;
 pub use email::LogEmailProvider;
 pub use state::AppState;
 
@@ -74,10 +79,16 @@ pub fn api_router(state: AppState) -> Router {
         .nest("/api/v1/stores", stores::router())
         .nest("/api/v1/roles", roles::router())
         .nest("/api/v1/product-types", products::product_types_router())
+        .nest("/api/v1/units", products::units_router())
+        .nest("/api/v1/price-rules", pricing::router())
+        .nest("/api/v1/customer-groups", customers::groups_router())
+        .nest("/api/v1/customers", customers::router())
         .nest("/api/v1/products", products::router())
         .nest("/api/v1/stock", stock::router())
         .nest("/api/v1/shifts", sales::shifts_router())
         .nest("/api/v1/sales", sales::router())
         .nest("/api/v1/sync", sync::router())
+        .fallback(http::not_found)
+        .method_not_allowed_fallback(http::method_not_allowed)
         .with_state(state)
 }

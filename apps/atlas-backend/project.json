@@ -29,7 +29,7 @@
         "parallel": false,
         "commands": [
           "nx reset",
-          "sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\"",
+          "PGOPTIONS='-c search_path=public' sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\"",
           "cargo run --manifest-path apps/atlas-backend/Cargo.toml"
         ]
       }
@@ -37,13 +37,13 @@
     "migrate": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\""
+        "command": "PGOPTIONS='-c search_path=public' sqlx migrate run --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\""
       }
     },
     "migrate:revert": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "sqlx migrate revert --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\""
+        "command": "PGOPTIONS='-c search_path=public' sqlx migrate revert --source apps/atlas-backend/migrations --database-url \"$ATLAS_DATABASE_ADMIN_URL\""
       }
     },
     "serve": {

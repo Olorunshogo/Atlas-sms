@@ -1,7 +1,6 @@
-use axum::Json;
-
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
+use crate::http::Json;
 use crate::response::ApiEnvelope;
 use crate::roles;
 use crate::sales::service as sales_service;
