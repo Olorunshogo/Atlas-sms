@@ -59,6 +59,18 @@ customer.view        look customers up (contact details masked)
 customer.manage      register, edit and erase customers
 customer.history     full contact details and purchase history
 payment.manage       confirm, fail or reverse a payment
+
+Added with purchasing, expenses and stock control:
+purchase.approve     approve a submitted purchase order, and receive more
+                     than was ordered when an over-receipt reason is given
+expense.manage       record, approve and pay store expenses
+stock.approve        adjust or write off more than the store's threshold
+audit.view           search the audit trail and see operational issues
+
+Added with the online storefront:
+storefront.manage    set up a store's online shop and shipping zones
+promotion.manage     create and change promotions
+order.manage         process, ship, deliver, cancel and collect online orders
 ```
 
 Small and coarse-grained on purpose. `product.manage` bundling four
@@ -238,15 +250,15 @@ Six tenant-facing roles plus one platform role, seeded once with fixed
 UUIDs (so code can reference `owner`'s ID as a constant, not a name
 lookup):
 
-| Role             | Scope in practice                                                                      | Permissions                                                                                                                                        |
-| ---------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `owner`          | tenant-wide                                                                            | Everything: sales, stock, purchasing, staff, stores, roles, reports, customers, `tenant.manage`, `product.manage`                                  |
-| `admin`          | tenant-wide                                                                            | Same as `owner` minus `tenant.manage`                                                                                                              |
+| Role             | Scope in practice                                                                      | Permissions                                                                                                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`          | tenant-wide                                                                            | Everything: sales, stock, purchasing, staff, stores, roles, reports, customers, `tenant.manage`, `product.manage`                                                                                                         |
+| `admin`          | tenant-wide                                                                            | Same as `owner` minus `tenant.manage`                                                                                                                                                                                     |
 | `store_manager`  | usually store-scoped                                                                   | Sales (incl. view, discount, override, return, reprint), payments, customers, stock, purchasing, `staff.invite`, `report.view`, `product.manage` - no `staff.remove`, `role.create`/`role.assign`, or store create/update |
-| `cashier`        | store-scoped                                                                           | `sale.create`, `sale.return`, `stock.view`, `customer.view`, `customer.manage`                                                                     |
-| `stock_clerk`    | store-scoped                                                                           | `stock.view`, `stock.adjust`, `stock.transfer`                                                                                                     |
-| `accountant`     | tenant **or** store-scoped (same role definition, only the grant's `store_id` differs) | `stock.view`, `report.view`, `sale.view`, `customer.history`                                                                                       |
-| `platform_admin` | platform                                                                               | Everything `owner` has, plus it's the only role with `scope = 'platform'`                                                                          |
+| `cashier`        | store-scoped                                                                           | `sale.create`, `sale.return`, `stock.view`, `customer.view`, `customer.manage`                                                                                                                                            |
+| `stock_clerk`    | store-scoped                                                                           | `stock.view`, `stock.adjust`, `stock.transfer`                                                                                                                                                                            |
+| `accountant`     | tenant **or** store-scoped (same role definition, only the grant's `store_id` differs) | `stock.view`, `report.view`, `sale.view`, `customer.history`                                                                                                                                                              |
+| `platform_admin` | platform                                                                               | Everything `owner` has, plus it's the only role with `scope = 'platform'`                                                                                                                                                 |
 
 `store_manager`, `cashier`, and `stock_clerk` are typically store-scoped
 grants in practice (per `docs/atlas/auth-flow.md`'s provisioning table),

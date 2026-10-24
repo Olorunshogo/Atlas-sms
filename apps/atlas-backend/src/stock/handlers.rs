@@ -3,6 +3,7 @@ use axum::Json;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::approvals;
 use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
@@ -62,6 +63,7 @@ pub async fn adjust_stock(
         "stock.adjust",
     )
     .await?;
+    approvals::assert_within_threshold(&mut tx, tenant_id, body.store_id, user_id, approvals::Threshold::Adjustment, body.quantity).await?;
     let movement = service::adjust_stock(&mut tx, tenant_id, user_id, &body).await?;
     audit::record(
         &mut tx,
@@ -138,6 +140,7 @@ pub async fn approve_transfer(Path(transfer_id): Path<Uuid>, mut tx: TenantTx) -
     let existing = service::get_transfer(&mut tx, transfer_id).await?;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.from_store_id), "stock.transfer").await?;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.to_store_id), "stock.transfer").await?;
+    approvals::assert_may_approve(&mut tx, existing.from_store_id, user_id, existing.requested_by_user_id).await?;
     let transfer = service::approve_transfer(&mut tx, tenant_id, user_id, transfer_id).await?;
     audit_transfer(&mut tx, &transfer, "stock_transfer.approve").await?;
     notifications::service::transfer(&mut tx, tenant_id, user_id, transfer.id, NotificationKind::TransferApproved).await;

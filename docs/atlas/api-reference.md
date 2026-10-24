@@ -295,24 +295,30 @@ Permission `sale.create` or `store.update` at the store. `data`:
   "refund_approval_threshold_minor": null,
   "restockable_conditions": ["resellable"],
   "allow_expired_sale": false,
-  "expiry_warning_days": 30
+  "expiry_warning_days": 30,
+  "adjustment_approval_quantity": null,
+  "write_off_approval_quantity": null,
+  "allow_self_approval": true
 }
 ```
 
-| Field                               | Effect                                                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `prices_include_tax`                | Price rules already include tax (tax is carved out) or exclude it (tax is added on top).                     |
-| `default_tax_rate_id`               | Rate for products with no rate of their own. `null` means no tax.                                            |
-| `cash_rounding_increment_minor`     | `1` is no rounding; `500` rounds a cash total to the nearest N5. The difference is a separate rounding line. |
-| `max_cashier_discount_basis_points` | Discount (share of gross) anyone may give; above it needs `sale.discount`.                                   |
-| `allow_negative_stock`              | Lets a live sale or a direct adjustment take stock below zero instead of failing `PRODUCT_OUT_OF_STOCK`.     |
-| `allow_pay_later`                   | Lets a sale with a named customer complete before it's fully paid.                                           |
-| `receipt_prefix`                    | Prefix of receipt and return numbers; defaults to the first four letters/digits of the slug, upper-cased.    |
-| `return_window_days`                | Returns need approval after the end of this many local days after the sale.                                  |
-| `refund_approval_threshold_minor`   | A return refund at or above this needs approval. `null` means no amount limit.                               |
-| `allow_expired_sale`                | Lets an expired batch be sold. Off, first-expiry-first-out skips it and naming it is `409 BATCH_EXPIRED`.    |
-| `expiry_warning_days`               | How many days ahead of expiry a batch counts as `near_expiry`.                                               |
-| `restockable_conditions`            | Item conditions that go back into saleable stock on return.                                                  |
+| Field                               | Effect                                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `prices_include_tax`                | Price rules already include tax (tax is carved out) or exclude it (tax is added on top).                                   |
+| `default_tax_rate_id`               | Rate for products with no rate of their own. `null` means no tax.                                                          |
+| `cash_rounding_increment_minor`     | `1` is no rounding; `500` rounds a cash total to the nearest N5. The difference is a separate rounding line.               |
+| `max_cashier_discount_basis_points` | Discount (share of gross) anyone may give; above it needs `sale.discount`.                                                 |
+| `allow_negative_stock`              | Lets a live sale or a direct adjustment take stock below zero instead of failing `PRODUCT_OUT_OF_STOCK`.                   |
+| `allow_pay_later`                   | Lets a sale with a named customer complete before it's fully paid.                                                         |
+| `receipt_prefix`                    | Prefix of receipt and return numbers; defaults to the first four letters/digits of the slug, upper-cased.                  |
+| `return_window_days`                | Returns need approval after the end of this many local days after the sale.                                                |
+| `refund_approval_threshold_minor`   | A return refund at or above this needs approval. `null` means no amount limit.                                             |
+| `allow_expired_sale`                | Lets an expired batch be sold. Off, first-expiry-first-out skips it and naming it is `409 BATCH_EXPIRED`.                  |
+| `expiry_warning_days`               | How many days ahead of expiry a batch counts as `near_expiry`.                                                             |
+| `adjustment_approval_quantity`      | An adjustment bigger than this (either way) needs `stock.approve`, else `409 APPROVAL_REQUIRED`. `null` = no limit.        |
+| `write_off_approval_quantity`       | The same for write-offs.                                                                                                   |
+| `allow_self_approval`               | Off: whoever raised a count, order, expense, transfer or purchase return can't approve it (`409 APPROVAL_SELF_FORBIDDEN`). |
+| `restockable_conditions`            | Item conditions that go back into saleable stock on return.                                                                |
 
 ### `PATCH /stores/{id}/settings`
 
@@ -944,22 +950,105 @@ Permission `stock.transfer` at the receiving store. Posts the
 
 ## 9. Purchasing
 
-### `GET /suppliers` / `POST /suppliers` / `PATCH /suppliers/{id}`
+### Suppliers (FR-20)
 
-List is any member; writes need `supplier.manage`. Body
-`{ name, phone?, email? }` (all optional on `PATCH`). Shape:
-`{ id, name, phone, email, balance_amount_minor }`; the balance moves only
-through goods receipts.
+Reads are any member; writes need `supplier.manage`. The balance is what
+the business owes the supplier: receipts (and an order's charges, with its
+first receipt) raise it, confirmed returns and payments lower it. It is
+never set directly.
 
-### `GET /purchase-orders?store_id=`
+Supplier shape:
 
-Permission `purchase.create` at the store.
-`[{ id, store_id, supplier_id, status }]`, newest first. Status is
-`draft`, `ordered`, `partially_received`, `received` or `cancelled`.
+```json
+{
+  "id": "0192...",
+  "code": "ACM-01",
+  "name": "Acme Foods",
+  "phone": "+2348011111111",
+  "email": null,
+  "address": "12 Wharf Rd, Apapa",
+  "payment_terms_days": 30,
+  "balance_amount_minor": 3500,
+  "deactivated_at": null
+}
+```
 
-### `POST /purchase-orders`
+### `GET /suppliers?q=&include_inactive=` / `POST /suppliers`
 
-Permission `purchase.create` at the store.
+`q` matches name, code, phone or email. Deactivated suppliers are left out
+unless `include_inactive=true`. Create body
+`{ name, code?, phone?, email?, address?, payment_terms_days? }`. `code` is
+unique per tenant, ignoring case (`409 ALREADY_EXISTS`).
+
+### `GET /suppliers/{id}` / `PATCH /suppliers/{id}`
+
+`GET` adds `products: [{ product_id, product_name, supplier_sku, unit_cost_amount_minor }]`.
+`PATCH` takes any of the create fields; an empty body is `400`.
+
+### `POST /suppliers/{id}/deactivate` / `POST /suppliers/{id}/reactivate`
+
+A deactivated supplier keeps its history but can't be put on a new or
+edited order (`409 SUPPLIER_INACTIVE`).
+
+### `PUT /suppliers/{id}/products`
+
+`{ products: [{ product_id, supplier_sku?, unit_cost_amount_minor? }] }`
+replaces the list of products this supplier sells.
+
+### `POST /suppliers/{id}/payments`
+
+`{ amount_minor, method, reference?, paid_on }`. Lowers the balance;
+paying more than is owed leaves the supplier in credit (a negative balance).
+
+### `GET /suppliers/{id}/transactions`
+
+Needs `supplier.manage`, or `purchase.create` at any store. Only this
+supplier's records, newest first:
+
+```json
+{
+  "supplier_id": "0192...",
+  "balance_amount_minor": 3500,
+  "transactions": [
+    {
+      "kind": "payment",
+      "id": "0192...",
+      "purchase_order_id": null,
+      "store_id": null,
+      "status": null,
+      "amount_minor": 2500,
+      "balance_effect_minor": -2500,
+      "occurred_at": "..."
+    },
+    {
+      "kind": "goods_receipt",
+      "id": "0192...",
+      "purchase_order_id": "0192...",
+      "store_id": "0192...",
+      "status": null,
+      "amount_minor": 6000,
+      "balance_effect_minor": 6000,
+      "occurred_at": "..."
+    }
+  ]
+}
+```
+
+`kind` is `purchase_order` (its total; owes nothing until received),
+`goods_receipt`, `purchase_return` (moves the balance once confirmed) or
+`payment`. The `balance_effect_minor` values add up to the balance.
+
+### Purchase orders (FR-21)
+
+`draft` -> `submitted` -> `ordered` (approved) -> `partially_received` ->
+`received`, with `cancelled` as the exit. Only an approved order can be
+received. Everything needs `purchase.create` at the order's store except
+approving, which needs `purchase.approve` (owner, admin and store manager
+hold it).
+
+### `GET /purchase-orders?store_id=` / `POST /purchase-orders`
+
+The list is `[{ id, store_id, supplier_id, status }]`, newest first.
 
 ```json
 {
@@ -971,54 +1060,76 @@ Permission `purchase.create` at the store.
       "quantity_ordered": "10",
       "unit_cost_amount_minor": 500
     }
-  ]
+  ],
+  "charges": [{ "description": "Delivery", "amount_minor": 1000 }]
 }
 ```
 
-### `PATCH /purchase-orders/{id}` (FR-21)
+`charges` is optional. The supplier must be active.
 
-Permission `purchase.create` at the order's store. `draft` only - edit
-before approval.
+### `GET /purchase-orders/{id}`
 
 ```json
 {
+  "id": "0192...",
+  "store_id": "0192...",
   "supplier_id": "0192...",
+  "status": "ordered",
+  "created_by_user_id": "0192...",
+  "created_at": "...",
+  "submitted_at": "...",
+  "approved_by_user_id": "0192...",
+  "approved_at": "...",
+  "cancelled_at": null,
   "lines": [
     {
+      "id": "0192...",
+      "purchase_order_id": "0192...",
       "product_id": "0192...",
-      "quantity_ordered": "20",
-      "unit_cost_amount_minor": 450
+      "quantity_ordered": "10",
+      "quantity_received": "6",
+      "quantity_cancelled": "0",
+      "quantity_outstanding": "4",
+      "unit_cost_amount_minor": 500
     }
-  ]
+  ],
+  "charges": [
+    { "id": "0192...", "description": "Delivery", "amount_minor": 1000 }
+  ],
+  "lines_total_amount_minor": 5000,
+  "charges_total_amount_minor": 1000,
+  "total_amount_minor": 6000
 }
 ```
 
-Both fields optional; `lines`, when given, replaces the order's lines
-wholesale. `409 PURCHASE_ORDER_NOT_DRAFT` outside `draft`.
+`GET /purchase-orders/{id}/lines` returns just `lines`.
 
-### `POST /purchase-orders/{id}/submit` (FR-21)
+### `PATCH /purchase-orders/{id}`
 
-Permission `purchase.create` at the order's store. `draft` -> `ordered` -
-this schema's granularity merges submit and approve into one step rather
-than a separate pending-approval state. `409 PURCHASE_ORDER_NOT_DRAFT`
-outside `draft`.
+`{ supplier_id?, lines?, charges? }`. Before approval only: a `submitted`
+order goes back to `draft` and has to be submitted again. `lines` and
+`charges`, when given, replace the old ones. `409 PURCHASE_ORDER_NOT_DRAFT`
+once approved.
 
-### `POST /purchase-orders/{id}/cancel` (FR-21)
+### `POST /purchase-orders/{id}/submit` / `POST /purchase-orders/{id}/approve`
 
-Permission `purchase.create` at the order's store. `draft` or `ordered`
-only - not once anything has been received. `409
-PURCHASE_ORDER_NOT_CANCELLABLE` otherwise.
+Submit is `draft` -> `submitted` (`409 PURCHASE_ORDER_NOT_DRAFT` otherwise)
+and notifies `purchase.approve` holders at the store. Approve is
+`submitted` -> `ordered` (`409 PURCHASE_ORDER_NOT_SUBMITTED` otherwise) and
+notifies whoever created the order.
 
-### `GET /purchase-orders/{id}/lines`
+### `POST /purchase-orders/{id}/cancel`
 
-Permission `purchase.create` at the order's store.
-`[{ id, purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost_amount_minor }]`.
+Cancels whatever is still outstanding: the whole order before any receipt,
+or just the rest after a partial one (each line's `quantity_cancelled`
+becomes what hadn't arrived; received stock stays). `409
+PURCHASE_ORDER_NOT_CANCELLABLE` once fully received or already cancelled.
 
 ### `POST /purchase-orders/{id}/receive`
 
-Permission `purchase.create` at the order's store. Records a goods
-received note: stock comes in, the supplier's balance goes up, the
-order's status is recomputed.
+Records a goods received note: stock comes in, the supplier's balance goes
+up, the order's status is recomputed. The order's charges are added to the
+balance with its first receipt, once.
 
 ```json
 {
@@ -1027,23 +1138,32 @@ order's status is recomputed.
       "purchase_order_line_id": "0192...",
       "quantity_received": "6",
       "batch_number": null,
-      "expiry_date": null
+      "expiry_date": null,
+      "over_receipt_reason": null
     }
   ]
 }
 ```
 
-`data`: `{ id, purchase_order }`. `400` when a line would receive more
-than is left on it. A batch-tracked product needs `batch_number`
+`data`: `{ id, purchase_order }`. `409 PURCHASE_ORDER_NOT_RECEIVABLE`
+unless the order is `ordered` or `partially_received`. Receiving more than
+a line has outstanding is `409 RECEIPT_EXCEEDS_OUTSTANDING`, unless the
+caller holds `purchase.approve` and gives `over_receipt_reason`, which is
+kept on the receipt line. A batch-tracked product needs `batch_number`
 (`400 BATCH_REQUIRED`), and a known batch number is topped up. Any other
-product must leave it out. A purchase return later takes stock back out of
-the batch it was received into.
+product must leave it out.
 
-### `POST /purchase-returns` (FR-23)
+### Purchase returns (FR-23)
 
-Permission `purchase.create` at the order's store. References a goods
-received note line, not the order line directly - that is what tracks
-how much was actually received and so is eligible to go back.
+`pending` -> `confirmed` or `cancelled`. Recording a return moves nothing;
+confirming takes the goods out of the batch they arrived in and off the
+supplier's balance at their received cost. All need `purchase.create` at
+the store.
+
+### `GET /purchase-returns?store_id=&supplier_id=` / `POST /purchase-returns`
+
+References a goods received note line, which is what tracks how much was
+received and is still eligible to go back.
 
 ```json
 {
@@ -1053,10 +1173,43 @@ how much was actually received and so is eligible to go back.
 }
 ```
 
-Posts a `purchase_return` stock movement per line (reducing stock) and
-reduces the supplier's balance by the line's original received cost.
-`409 RETURN_QUANTITY_EXCEEDED` if a line would return more than that GRN
-line has received minus what it has already returned.
+Shape:
+
+```json
+{
+  "id": "0192...",
+  "store_id": "0192...",
+  "supplier_id": "0192...",
+  "purchase_order_id": "0192...",
+  "reason": "Damaged in transit",
+  "status": "pending",
+  "created_by_user_id": "0192...",
+  "created_at": "...",
+  "confirmed_by_user_id": null,
+  "confirmed_at": null,
+  "cancelled_at": null,
+  "total_amount_minor": 1500,
+  "lines": [
+    {
+      "id": "0192...",
+      "goods_received_note_line_id": "0192...",
+      "product_id": "0192...",
+      "quantity": "3",
+      "unit_cost_amount_minor": 500,
+      "amount_minor": 1500
+    }
+  ]
+}
+```
+
+`409 RETURN_QUANTITY_EXCEEDED` when a line asks for more than was received,
+less what was already returned and what other pending returns hold.
+
+### `GET /purchase-returns/{id}` / `POST /purchase-returns/{id}/confirm` / `POST /purchase-returns/{id}/cancel`
+
+Confirm checks the quantities again, since things may have moved since
+the return was recorded. Either action outside `pending` is
+`409 PURCHASE_RETURN_NOT_PENDING`.
 
 ---
 
@@ -1770,6 +1923,81 @@ purchase history, newest first, from the stores where the caller holds
 
 ## 16. Reports
 
+### Business reports (FR-25)
+
+`GET /reports/summary`, `/reports/sales-by-product`, `/reports/inventory-valuation`,
+`/reports/purchases-by-supplier` and `/reports/expenses-by-category` all take
+`from`, `to` (timestamps; `from` inclusive, `to` exclusive) and `store_id`,
+plus the filters listed for each. Each covers only the stores where the
+caller holds `report.view`; naming another store is `403`. Add
+`format=csv` for a CSV download instead of JSON.
+
+Definitions, kept separate rather than folded together: `revenue_minor` is
+completed sales by completion time; `net_revenue_minor` is revenue less
+tax; `cost_of_goods_minor` uses the unit cost each line was sold at (from
+the store listing at the moment of sale, so later cost changes don't
+rewrite it); `gross_profit_minor` is net revenue less cost of goods;
+`payments_collected_minor` is succeeded payments by when they were taken;
+`refunds_minor` is executed refunds; `expenses_minor` is approved expenses
+by expense date; `purchases_received_minor` is goods receipts at order
+cost; `inventory_value_minor` is current on-hand at listed cost and ignores
+the date range.
+
+### `GET /reports/summary?from=&to=&store_id=`
+
+```json
+{
+  "from": null,
+  "to": null,
+  "totals": {
+    "sales_count": 1,
+    "revenue_minor": 3000,
+    "tax_minor": 0,
+    "discounts_minor": 0,
+    "net_revenue_minor": 3000,
+    "cost_of_goods_minor": 1800,
+    "gross_profit_minor": 1200,
+    "payments_collected_minor": 3000,
+    "refunds_minor": 0,
+    "returns_count": 0,
+    "expenses_minor": 700,
+    "purchases_received_minor": 0,
+    "transfers_out_count": 0,
+    "transfers_in_count": 0,
+    "inventory_value_minor": 15300
+  },
+  "stores": [
+    {
+      "store_id": "0192...",
+      "store_name": "Lagos",
+      "sales_count": 1,
+      "revenue_minor": 3000,
+      "...": "same fields as totals"
+    }
+  ]
+}
+```
+
+`totals` is the sum of `stores`. The CSV is one row per store.
+
+### `GET /reports/sales-by-product?from=&to=&store_id=&product_id=&category_id=&cashier_user_id=`
+
+`[{ product_id, product_name, sku, quantity, net_amount_minor, tax_minor, cost_of_goods_minor, gross_profit_minor }]`,
+best sellers first. `quantity` is in base units.
+
+### `GET /reports/inventory-valuation?store_id=&product_id=&category_id=`
+
+`[{ store_id, product_id, product_name, on_hand, unit_cost_amount_minor, value_minor }]`, largest value first.
+
+### `GET /reports/purchases-by-supplier?from=&to=&store_id=&supplier_id=`
+
+`[{ supplier_id, supplier_name, orders_count, received_minor, returned_minor, net_purchases_minor }]`:
+receipts and confirmed returns in the window.
+
+### `GET /reports/expenses-by-category?from=&to=&store_id=`
+
+`[{ store_id, category_id, category_name, approved_minor, paid_minor, unpaid_minor }]`, approved expenses only.
+
 ### `GET /reports/payments/reconciliation?store_id=&shift_id=&from=&to=`
 
 Permission `report.view` or `sale.view` at the store. `store_id` is
@@ -1868,6 +2096,25 @@ so the next drop raises a new one.
 `entity_type` + `entity_id` point at the record to open. Opening it still
 goes through that record's own permission checks.
 
+### `GET /notifications/preferences` / `PUT /notifications/preferences`
+
+The caller's own settings. `GET` lists every kind with its effective
+setting; without a saved one a kind is in-app only:
+
+```json
+[{ "kind": "transfer_requested", "in_app": true, "email": false }]
+```
+
+`PUT { preferences: [{ kind, in_app, email }] }` saves the kinds given and
+returns the full list. With `in_app: false` the notification doesn't reach
+the caller's inbox; with `email: true` it is queued for email.
+
+Emails go through an outbox: raising the notification only queues a row,
+and a worker in the API process sends due ones every 30 seconds. A failed
+send waits 2^attempts minutes; after 5 attempts the delivery is `failed`
+and an `email_delivery_failed` operational issue is raised. Delivery never
+holds up or rolls back the action behind it.
+
 ### `GET /notifications/unread-count`
 
 `{ unread }`.
@@ -1882,65 +2129,481 @@ Returns the notification. `404` when it isn't in the caller's inbox.
 
 ---
 
+## 16c. Audit trail (FR-27)
+
+### `GET /audit-events?actor_user_id=&action=&entity_type=&entity_id=&store_id=&from=&to=&before_id=&limit=`
+
+Needs `audit.view` (owner, admin). Newest first; `limit` defaults to 50,
+max 200; page with `before_id` set to the last id seen. `action` is exact,
+or a prefix ending in `.` (`stock.` for every stock action).
+
+```json
+[
+  {
+    "id": "0192...",
+    "actor_user_id": "0192...",
+    "actor_name": "Ada Obi",
+    "device_id": null,
+    "store_id": "0192...",
+    "entity_type": "stock_movement",
+    "entity_id": "0192...",
+    "action": "stock.adjust",
+    "outcome": "success",
+    "before": null,
+    "after": {
+      "reason": "Recount",
+      "quantity": "5",
+      "...": "the record as written"
+    },
+    "created_at": "..."
+  }
+]
+```
+
+Every mutation writes one, including logins (`auth.login`), tenant
+switches and settings changes (with `before` and `after`). `store_id` comes
+from the record itself. The rows are append-only: the API's database role
+can't update or delete them, and a trigger refuses any update.
+
+---
+
+## 16d. Operations (FR-30)
+
+Needs `audit.view`. Problems that didn't fail a request but need a person.
+
+### `GET /operations/issues?status=&kind=` / `POST /operations/issues/{id}/resolve`
+
+`status` is `open` (default), `resolved` or `all`. `kind` is
+`notification_failed` (a notification couldn't be written and was dropped)
+or `email_delivery_failed`.
+`[{ id, kind, detail, reference_id, resolved_at, created_at }]`.
+
+### `GET /operations/stock-exceptions?store_id=&include_resolved=` / `POST /operations/stock-exceptions/{id}/resolve`
+
+Offline sales that took stock below zero:
+`[{ id, store_id, product_id, stock_item_id, movement_id, on_hand_before, requested, source, reference_id, resolved_at, created_at }]`.
+Resolve once a count has corrected the balance.
+
+---
+
+## 16e. Import and export (FR-28)
+
+### `GET /imports/templates/{kind}`
+
+`kind` is `products`, `suppliers` or `opening-stock`.
+
+A CSV with the header row and an example line.
+
+### `POST /imports/products?dry_run=` / `POST /imports/suppliers?dry_run=` / `POST /imports/opening-stock?store_id=&dry_run=`
+
+The body is the CSV itself. Products need `product.manage`, suppliers
+`supplier.manage`, opening stock `stock.adjust` at `store_id`.
+
+| File          | Columns (required in bold)                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| products      | **name**, **sku**, **product_type** (name), **base_unit** (name or abbreviation), category (an active one), barcode |
+| suppliers     | **name**, code, phone, email, address, payment_terms_days                                                           |
+| opening-stock | **sku**, **quantity**, batch_number (required for batch-tracked products), expiry_date (`YYYY-MM-DD`)               |
+
+Every row is checked first: required fields, types, that names refer to
+something that exists, and duplicates both inside the file and against
+what the business already has. Any problem rejects the whole file, so
+nothing is ever partly imported:
+
+```json
+{
+  "success": false,
+  "code": "IMPORT_INVALID",
+  "message": "2 problem(s) found; nothing was imported.",
+  "data": {
+    "total_rows": 5,
+    "errors": [{ "row": 3, "field": "name", "message": "required" }]
+  }
+}
+```
+
+`row` counts the header as row 1. Status `422`. `dry_run=true` runs the
+checks and writes nothing. Success is `{ total_rows, imported, dry_run }`.
+Opening stock posts each row as an `adjustment` with reason
+`Opening stock import`.
+
+### `GET /exports/products` / `GET /exports/suppliers`
+
+CSV in the import template's own columns, so an export can be edited and
+re-imported. Suppliers need `supplier.manage`. Reports export with
+`format=csv` (section 16).
+
+---
+
+## 18. Online storefront
+
+An approved addition to the SRS's initial scope. Every third party is a mock
+for now, behind an adapter (`apps/atlas-backend/src/integrations.rs`): a
+payment gateway, a courier and social sign-in. A real Paystack, Flutterwave,
+courier or Google adapter is one new implementation. The mocks sign their
+webhooks as the hex SHA-256 of `secret || body`, with the secret from
+`ATLAS_WEBHOOK_SECRET`.
+
+### Staff setup
+
+Needs `storefront.manage` at the store (owner, admin, store manager).
+
+### `GET /storefronts/{store_id}` / `PUT /storefronts/{store_id}`
+
+```json
+{
+  "handle": "ada-foods",
+  "is_enabled": true,
+  "reservation_minutes": 15,
+  "ussd_window_minutes": 30,
+  "bank_transfer_window_minutes": 1440,
+  "guest_cart_days": 30,
+  "pay_on_delivery_max_minor": 5000000,
+  "pay_on_delivery_requires_account": true,
+  "loyalty_minor_per_point": 10000,
+  "loyalty_point_value_minor": 100,
+  "loyalty_max_redeem_basis_points": 2000
+}
+```
+
+`handle` is the shop's public address, unique across Atlas (`409
+ALREADY_EXISTS`). Only `handle` is required on `PUT`; the rest keep their
+defaults. A disabled storefront, or one whose store is inactive, answers
+`404` on every public route.
+
+### `GET /storefronts/{store_id}/shipping-zones` / `POST /storefronts/{store_id}/shipping-zones` / `PATCH /storefronts/{store_id}/shipping-zones/{zone_id}`
+
+`{ name, regions: ["Lagos"], base_fee_minor, per_kg_fee_minor, allows_pay_on_delivery }`.
+Shipping is `base_fee_minor + per_kg_fee_minor × weight`, with weight the
+sum of each product's `weight_kg` attribute times its quantity (a product
+without one weighs nothing). A free-shipping promotion zeroes it. `PATCH` also takes
+`is_active`.
+
+### `GET /promotions?store_id=` / `POST /promotions` / `GET /promotions/{id}` / `PATCH /promotions/{id}`
+
+Needs `promotion.manage`.
+
+```json
+{
+  "store_id": null,
+  "name": "Weekend 10%",
+  "kind": "coupon",
+  "discount": "percentage",
+  "discount_value": 1000,
+  "coupon_code": "WEEKEND10",
+  "product_ids": [],
+  "category_ids": [],
+  "bundle_product_ids": [],
+  "customer_group_id": null,
+  "first_order_only": false,
+  "min_spend_minor": 500000,
+  "min_quantity": null,
+  "flash_price_minor": null,
+  "flash_stock_cap": null,
+  "stackable": false,
+  "starts_at": null,
+  "ends_at": null,
+  "total_usage_limit": 100,
+  "per_customer_limit": 1
+}
+```
+
+`kind` is `coupon` (needs `coupon_code`), `automatic`, `flash_sale` (a
+time-boxed `flash_price_minor` per unit, sold until `flash_stock_cap` units
+have gone) or `bundle` (applies only when every `bundle_product_ids` item is
+in the cart). `discount` is `percentage` (`discount_value` in basis points),
+`fixed_amount` (minor units) or `free_shipping`. Eligibility: products or
+categories (empty means everything), customer group, first order only,
+minimum spend and quantity, the window, and total and per-customer usage
+limits. Stacking: at most one coupon per order; an automatic promotion stacks
+with the coupon only if both are `stackable`; a flash price doesn't stack with
+other discounts unless the flash sale is `stackable`. Of the allowed
+combinations, checkout applies the one that saves the customer most.
+`PATCH` takes `name`, `discount_value`, `stackable`, the window, the limits
+and `is_active`.
+
+### Staff orders
+
+Needs `order.manage` at the order's store. Status runs `pending_payment` ->
+`paid` -> `processing` -> `shipped` -> `delivered`, with `cancelled` and
+`expired` as exits.
+
+### `GET /shop-orders?store_id=&status=` / `GET /shop-orders/{id}`
+
+The detail includes lines, payments, the invoice and receipt numbers, the
+shipment and its tracking events. A pay-on-delivery order can be shipped
+while still `pending_payment`; the others ship once `paid` or
+`processing`.
+
+### `POST /shop-orders/{id}/process` / `POST /shop-orders/{id}/ship` / `POST /shop-orders/{id}/deliver`
+
+`ship` books the courier (mock), storing its tracking number and label URL,
+and emails the customer. `409 ORDER_STATUS_INVALID` out of order.
+
+### `POST /shop-orders/{id}/cancel`
+
+`{ reason }`. Before shipping only (`409 ORDER_NOT_CANCELLABLE`). Releases
+reserved stock, puts back stock already taken, refunds a paid order through
+the gateway (`502 REFUND_FAILED` if the gateway refuses), and reverses the
+order's loyalty points.
+
+### `POST /shop-orders/{id}/collect-payment`
+
+Pay on delivery: the courier or staff collected the money. Marks the
+payment succeeded and the order paid, takes the stock and issues the
+receipt. Refused for any other payment method, an order already paid, or a
+cancelled one.
+
+### Public shop API (`/shop/{handle}`)
+
+No staff login. A shopper's session is `Authorization: Bearer <token>` from
+the shop's own signup, login or social sign-in. These tokens are signed with
+a key derived from, but different to, the staff key, so neither kind of token
+works on the other's endpoints. A guest cart is identified by an opaque
+`x-cart-token` header, returned when the guest first adds an item.
+
+### `GET /shop/{handle}` / `GET /shop/{handle}/categories`
+
+The shop: `{ handle, store_name, currency, prices_include_tax, shipping_zones, pay_on_delivery_max_minor, loyalty_enabled, loyalty_point_value_minor }`,
+where `shipping_zones` lists the active zones and their fees. Categories are
+the unarchived ones.
+
+### `GET /shop/{handle}/products?q=&category_id=&min_price_minor=&max_price_minor=&in_stock=&sort=&limit=&offset=`
+
+Active products listed at the store and priced. `sort` is `name`,
+`price_asc`, `price_desc` or `newest`. Each product is
+`{ id, name, sku, category_id, attributes, price_minor, sale_price_minor, available, in_stock }`:
+`price_minor` comes from the same price rules as the till, `sale_price_minor`
+is set while a flash sale covers it, and `available` is on hand less active
+reservations.
+
+### `GET /shop/{handle}/products/{product_id}` / `GET /shop/{handle}/products/{product_id}/recommendations`
+
+Viewing a product records it in the viewer's recently viewed trail (by
+shopper, or by cart token for a guest). Recommendations return
+`{ related, frequently_bought_together, recently_viewed }`: same category;
+products most often in the same basket across online orders and till
+sales; and the viewer's own trail.
+
+### `POST /shop/{handle}/auth/signup` / `POST /shop/{handle}/auth/login` / `POST /shop/{handle}/auth/social`
+
+Signup `{ email, password, full_name, phone? }` (`400 EMAIL_ALREADY_REGISTERED`),
+login `{ email, password }`, social `{ provider: "google" | "facebook", token }`.
+The mock social provider accepts `mock:{subject}:{email}:{full name}`. Social
+sign-in links to an existing shopper with the same email, or creates one. All
+three return `{ token, shopper }` and, when the request carried
+`x-cart-token`, merge that guest cart into the account cart, adding
+quantities up to what's available. A shopper is also a customer record of
+the business.
+
+### `GET /shop/{handle}/account` / `GET /shop/{handle}/account/loyalty`
+
+The account is the shopper (`{ id, customer_id, email, full_name, phone }`)
+plus `loyalty_points` and `pending_loyalty_points`. Loyalty is
+`{ enabled, available_points, pending_points, point_value_minor, entries }`.
+Points are earned on what was paid after discounts, excluding shipping and
+tax (`loyalty_minor_per_point`), and become available once the store's
+return window has passed.
+
+### `GET /shop/{handle}/cart` / `POST /shop/{handle}/cart/items` / `PATCH /shop/{handle}/cart/items/{product_id}` / `DELETE /shop/{handle}/cart/items/{product_id}`
+
+Add `{ product_id, quantity }`; set `{ quantity }`. Nothing is reserved while
+items sit in the cart. The cart is `{ cart_token?, items, subtotal_minor }`,
+each item `{ product_id, name, sku, quantity, unit_price_minor, added_unit_price_minor, price_changed, available, in_stock, line_total_minor }`.
+`cart_token` is only sent to a guest, to send back as `x-cart-token`. A guest cart
+lasts `guest_cart_days`; an account cart is the same on every device.
+
+### `POST /shop/{handle}/cart/items/{product_id}/move-to-wishlist` / `GET /shop/{handle}/wishlist` / `PUT /shop/{handle}/wishlist/{product_id}` / `DELETE /shop/{handle}/wishlist/{product_id}` / `POST /shop/{handle}/wishlist/{product_id}/move-to-cart`
+
+Wishlists need a shopper login (`401` otherwise).
+
+### `POST /shop/{handle}/checkout/quote`
+
+`{ shipping_zone_id, coupon_code?, points?, email? }`. Prices the cart on the
+server in the order the customer sees it:
+
+```json
+{
+  "currency": "NGN",
+  "prices_include_tax": true,
+  "lines": [
+    {
+      "product_id": "0192...",
+      "product_name": "Rice 50kg",
+      "sku": "RICE-50",
+      "quantity": "2",
+      "unit_price_minor": 75000,
+      "discount_minor": 15000,
+      "net_minor": 135000,
+      "tax_rate_basis_points": 750,
+      "tax_minor": 9419,
+      "total_minor": 135000,
+      "available": "40"
+    }
+  ],
+  "subtotal_minor": 150000,
+  "discount_minor": 15000,
+  "shipping_minor": 3000,
+  "tax_minor": 9419,
+  "total_minor": 138000,
+  "promotions": [{ "...": "each applied promotion and its saving" }],
+  "coupon_error": null,
+  "points_redeemed": 0,
+  "points_value_minor": 0,
+  "weight_kg": "100",
+  "shipping_zone_id": "0192..."
+}
+```
+
+A coupon that doesn't apply comes back as `coupon_error` rather than failing
+the quote. Reserves nothing.
+
+### `POST /shop/{handle}/checkout`
+
+```json
+{
+  "idempotency_key": "client-generated",
+  "email": "guest@example.com",
+  "phone": "+2348031234567",
+  "full_name": "Guest Buyer",
+  "delivery_address": { "line1": "4 Allen Ave", "state": "Lagos" },
+  "shipping_zone_id": "0192...",
+  "payment_method": "card",
+  "coupon_code": null,
+  "points": 0,
+  "expected_total_minor": 315000
+}
+```
+
+Guests must give `email` and `phone`. Everything is priced again; if the
+total is no longer `expected_total_minor` the answer is `409
+TOTAL_CHANGED` with the new quote in `data`, so the customer confirms it
+before anything is charged. Otherwise the order is created (with an invoice
+number), stock is reserved, and the payment is started. `payment_method` is
+`card`, `mobile_wallet` (a `redirect_url`), `bank_transfer` or `ussd`
+(`instructions`, with the order held `pending_payment` for the store's
+window), or `pay_on_delivery`, limited by `pay_on_delivery_max_minor`, the
+zone and `pay_on_delivery_requires_account` (`409 PAY_ON_DELIVERY_UNAVAILABLE`).
+Card and wallet hold stock for `reservation_minutes`. The same
+`idempotency_key` returns the same order. Returns the order plus an
+`access_token` a guest uses to view it later.
+
+A payment counts only once the gateway confirms it to the server:
+
+### `POST /shop-webhooks/payments`
+
+Header `x-gateway-signature`; body `{ gateway_ref, status: "succeeded" | "failed" }`.
+Succeeded: the order is paid, stock taken, reservations converted, promotion
+use and loyalty recorded, a receipt number issued, and the invoice and
+receipt emailed (best effort, never blocking). A payment arriving for an
+order already cancelled is refunded. Failed: the order stays
+`pending_payment` so the customer can retry. `401` for a bad signature.
+
+### `POST /shop-webhooks/couriers`
+
+Header `x-courier-signature`; body `{ tracking_number, status: "in_transit" | "delivered" | "failed", note? }`.
+Adds a tracking event; `delivered` completes the order. Each status change
+is emailed to the customer.
+
+### `GET /shop/{handle}/orders` / `GET /shop/{handle}/orders/{order_id}?access_token=`
+
+A shopper's own orders; one order to its shopper or to whoever holds its
+`access_token`. An unpaid order past its window becomes `expired` and its
+stock is released.
+
+### `GET /shop/{handle}/orders/{order_id}/invoice?access_token=&format=` / `GET /shop/{handle}/orders/{order_id}/tracking?access_token=`
+
+The invoice is never edited after it is issued: seller and buyer, lines,
+discounts, shipping, tax by rate and totals, as JSON or `format=text`.
+Tracking is the shipment's events.
+
+### `POST /shop/{handle}/orders/{order_id}/payments`
+
+`{ method, idempotency_key, access_token? }`. Retry or switch method after a
+failed payment without re-entering the order (`409 ORDER_NOT_PAYABLE` unless
+it's `pending_payment`).
+
+---
+
 ## 17. Error codes
 
-| Code                             | Status      | Meaning / what the client should do                                                                   |
-| -------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
-| `EMAIL_ALREADY_REGISTERED`       | 400         | Signup with an email in use. Offer login.                                                             |
-| `EMAIL_NOT_VERIFIED`             | 400/403     | Account not verified: signup again (400) or any tenant endpoint (403). Show the verify step.          |
-| `TENANT_REQUIRED`                | 409         | User belongs to several tenants; pick one from `data.tenants` and log in again.                       |
-| `PLATFORM_TENANT_REQUIRED`       | 409         | Same, for platform staff.                                                                             |
-| `ROLE_NOT_FOUND`                 | 409         | The account has no active role in any tenant.                                                         |
-| `SHIFT_ALREADY_OPEN`             | 409         | The store already has an open shift.                                                                  |
-| `SHIFT_NOT_OPEN`                 | 409/400     | The shift is closed (409) or belongs to another store (400).                                          |
-| `STORE_INACTIVE`                 | 400/409     | The store is deactivated (400 at checkout, 409 for transfers).                                        |
-| `PRODUCT_NOT_SOLD_HERE`          | 400         | Unknown, inactive, or not listed at this store.                                                       |
-| `PRODUCT_NOT_PRICED`             | 409         | No price rule applies; add one or override the price.                                                 |
-| `INVALID_UNIT`                   | 400         | The unit isn't one of the product's units.                                                            |
-| `STOCK_ITEM_REQUIRED`            | 400         | Serial-tracked product without a `stock_item_id`, or one that isn't the product's.                    |
-| `BATCH_REQUIRED`                 | 400         | Batch-tracked product posted without naming its batch.                                                |
-| `BATCH_EXPIRED`                  | 409         | Named batch has expired and the store's `allow_expired_sale` is off.                                  |
-| `STOCK_COUNT_NOT_PENDING`        | 409         | Stock count already approved or rejected.                                                             |
-| `TRANSFER_NOT_REQUESTED`         | 409         | Approve or reject on a transfer that's no longer `requested`.                                         |
-| `TRANSFER_NOT_APPROVED`          | 409         | Dispatch on a transfer that isn't `approved`.                                                         |
-| `TRANSFER_NOT_DISPATCHED`        | 409         | Receive on a transfer that isn't `dispatched`.                                                        |
-| `TRANSFER_NOT_CANCELLABLE`       | 409         | Cancel after dispatch, or of a finished transfer.                                                     |
-| `PURCHASE_ORDER_NOT_DRAFT`       | 409         | Edit or submit on an order that's no longer `draft`.                                                  |
-| `PURCHASE_ORDER_NOT_CANCELLABLE` | 409         | Cancel once goods have been received, or of a finished order.                                         |
-| `EXPENSE_NOT_DRAFT`              | 409         | Edit or submit on an expense that's no longer `draft`.                                                |
-| `EXPENSE_NOT_SUBMITTED`          | 409         | Approve or reject on an expense that isn't `submitted`.                                               |
-| `EXPENSE_NOT_APPROVED`           | 409         | Mark paid on an expense that isn't `approved`.                                                        |
-| `PRODUCT_OUT_OF_STOCK`           | 409         | Not enough on hand (message has requested and available).                                             |
-| `PRICE_OVERRIDE_FORBIDDEN`       | 403         | Override without `sale.price_override`, or without a reason.                                          |
-| `DISCOUNT_FORBIDDEN`             | 403         | Discount above the cashier limit without `sale.discount`.                                             |
-| `TOTAL_MISMATCH`                 | 409         | The till's total is stale; re-quote and show the new total.                                           |
-| `IDEMPOTENCY_CONFLICT`           | 409         | A different request already used this id; generate a new id.                                          |
-| `PAYMENT_INSUFFICIENT`           | 400         | Payments don't cover the amount due.                                                                  |
-| `PAYMENT_OVERPAID`               | 400         | Payments exceed what's due; record cash change as tendered.                                           |
-| `PAYMENT_REFERENCE_REQUIRED`     | 400         | This method needs a transaction reference.                                                            |
-| `PAYMENT_METHOD_INVALID`         | 400         | Unknown or inactive method, or one that can't be used here (store credit at checkout).                |
-| `PAYMENT_METHOD_EXISTS`          | 409         | Payment method code already in use.                                                                   |
-| `DUPLICATE_PAYMENT_REFERENCE`    | 409         | That reference is already on a live payment of this method.                                           |
-| `INVALID_PAYMENT_TRANSITION`     | 409         | The payment can't move to that status from where it is.                                               |
-| `SALE_NOT_COMPLETED`             | 409         | Returns and later payments need a completed (or awaiting-payment) sale.                               |
-| `SALE_NOT_VOIDABLE`              | 409         | Shift closed, or goods already returned/refunded; use a return.                                       |
-| `RETURN_QUANTITY_EXCEEDED`       | 409         | More than is left to return on that line (message says how many).                                     |
-| `ITEM_NOT_RETURNABLE`            | 400         | The product is marked non-returnable.                                                                 |
-| `REFUND_AMOUNT_EXCEEDED`         | 409         | More than was paid and not yet refunded, on the sale or the payment.                                  |
-| `RETURN_NOT_PENDING`             | 409         | The return isn't waiting for approval.                                                                |
-| `APPROVAL_SELF_FORBIDDEN`        | 403         | The person who started a return can't approve it.                                                     |
-| `CUSTOMER_REQUIRED`              | 400         | Store credit needs a customer on the sale.                                                            |
-| `CUSTOMER_PHONE_EXISTS`          | 409         | A customer with this phone already exists; look them up.                                              |
-| `BARCODE_EXISTS`                 | 409         | The barcode is already assigned to a product.                                                         |
-| `ALREADY_EXISTS`                 | 409         | A record with these details exists (duplicate slug, SKU, unit, group or sale unit).                   |
-| `GROUP_IN_USE`                   | 409         | The customer group still has customers or price rules.                                                |
-| `SHIFT_OPEN`                     | 409         | Close the store's open shift before deactivating the store.                                           |
-| `PRODUCT_INACTIVE`               | 409         | The product is deactivated (transfers). Adjustments are still allowed.                                |
-| `VALIDATION_FAILED`              | 400         | A field is missing, blank, too long, malformed or out of range; the message names it.                 |
-| `INVALID_REFERENCE`              | 400         | A referenced record does not exist.                                                                   |
-| `INVALID_VALUE`                  | 400         | A value is outside what the database allows.                                                          |
-| `INVALID_REQUEST`                | 400/415/422 | The body, path or query could not be read (bad JSON, wrong shape, wrong content type, unknown field). |
-| `ROUTE_NOT_FOUND`                | 404         | No such endpoint.                                                                                     |
-| `METHOD_NOT_ALLOWED`             | 405         | The endpoint exists but not for this HTTP method.                                                     |
+| Code                       | Status  | Meaning / what the client should do                                                          |
+| -------------------------- | ------- | -------------------------------------------------------------------------------------------- |
+| `EMAIL_ALREADY_REGISTERED` | 400     | Signup with an email in use. Offer login.                                                    |
+| `EMAIL_NOT_VERIFIED`       | 400/403 | Account not verified: signup again (400) or any tenant endpoint (403). Show the verify step. |
+| `TENANT_REQUIRED`          | 409     | User belongs to several tenants; pick one from `data.tenants` and log in again.              |
+| `PLATFORM_TENANT_REQUIRED` | 409     | Same, for platform staff.                                                                    |
+| `ROLE_NOT_FOUND`           | 409     | The account has no active role in any tenant.                                                |
+| `SHIFT_ALREADY_OPEN`       | 409     | The store already has an open shift.                                                         |
+| `SHIFT_NOT_OPEN`           | 409/400 | The shift is closed (409) or belongs to another store (400).                                 |
+| `STORE_INACTIVE`           | 400/409 | The store is deactivated (400 at checkout, 409 for transfers).                               |
+| `PRODUCT_NOT_SOLD_HERE`    | 400     | Unknown, inactive, or not listed at this store.                                              |
+| `PRODUCT_NOT_PRICED`       | 409     | No price rule applies; add one or override the price.                                        |
+| `INVALID_UNIT`             | 400     | The unit isn't one of the product's units.                                                   |
+| `STOCK_ITEM_REQUIRED`      | 400     | Serial-tracked product without a `stock_item_id`, or one that isn't the product's.           |
+| `BATCH_REQUIRED`           | 400     | Batch-tracked product posted without naming its batch.                                       |
+| `BATCH_EXPIRED`            | 409     | Named batch has expired and the store's `allow_expired_sale` is off.                         |
+| `STOCK_COUNT_NOT_PENDING`  | 409     | Stock count already approved or rejected.                                                    |
+| `TRANSFER_NOT_REQUESTED`   | 409     | Approve or reject on a transfer that's no longer `requested`.                                |
+| `TRANSFER_NOT_APPROVED`    | 409     | Dispatch on a transfer that isn't `approved`.                                                |
+| `TRANSFER_NOT_DISPATCHED`  | 409     | Receive on a transfer that isn't `dispatched`.                                               |
+| `TRANSFER_NOT_CANCELLABLE` | 409     | Cancel after dispatch, or of a finished transfer.                                            |
+| `PURCHASE_ORDER_NOT_DRAFT` | 409     | Edit or submit on an order that's no longer `draft`.                                         |
+
+| `TOTAL_CHANGED` | 409 | Checkout total differs from `expected_total_minor`; `data` has the new quote. |
+| `CART_EMPTY` | 400 | Checkout with nothing in the cart. |
+| `COUPON_NOT_APPLICABLE` | 409 | The coupon doesn't exist, has ended, or isn't eligible for this cart. |
+| `LOYALTY_REDEMPTION_INVALID` | 409 | More points than available, or more than the redemption cap. |
+| `SHIPPING_ZONE_INVALID` | 400 | Unknown or inactive shipping zone. |
+| `PAY_ON_DELIVERY_UNAVAILABLE` | 409 | Pay on delivery not allowed for this order value, zone or customer. |
+| `PAYMENT_START_FAILED` | 502 | The payment gateway refused to start the payment. |
+| `ORDER_NOT_PAYABLE` | 409 | Retry payment on an order that isn't `pending_payment`. |
+| `ORDER_STATUS_INVALID` | 409 | Staff moved an order out of sequence. |
+| `ORDER_NOT_CANCELLABLE` | 409 | Cancel after shipping or of a finished order. |
+| `REFUND_FAILED` | 502 | The payment gateway refused the refund for a cancelled order. |
+| `COURIER_FAILED` | 502 | The courier refused the shipment booking. |
+| `APPROVAL_REQUIRED` | 409 | Over the store's adjustment or write-off threshold without `stock.approve`. |
+| `IMPORT_INVALID` | 422 | An import had invalid rows; `data.errors` lists them and nothing was written. |
+| `PURCHASE_ORDER_NOT_CANCELLABLE` | 409 | Cancel an order that is already fully received or cancelled. |
+| `PURCHASE_ORDER_NOT_SUBMITTED` | 409 | Approve on an order that isn't `submitted`. |
+| `PURCHASE_ORDER_NOT_RECEIVABLE` | 409 | Receive on an order that isn't approved, or is cancelled or fully received. |
+| `RECEIPT_EXCEEDS_OUTSTANDING` | 409 | More than is outstanding, without an approver's `over_receipt_reason`. |
+| `PURCHASE_RETURN_NOT_PENDING` | 409 | Confirm or cancel a return that isn't `pending`. |
+| `SUPPLIER_INACTIVE` | 409 | A deactivated supplier on a new or edited order. |
+| `EXPENSE_NOT_DRAFT` | 409 | Edit or submit on an expense that's no longer `draft`. |
+| `EXPENSE_NOT_SUBMITTED` | 409 | Approve or reject on an expense that isn't `submitted`. |
+| `EXPENSE_NOT_APPROVED` | 409 | Mark paid on an expense that isn't `approved`. |
+| `PRODUCT_OUT_OF_STOCK` | 409 | Not enough on hand (message has requested and available). |
+| `PRICE_OVERRIDE_FORBIDDEN` | 403 | Override without `sale.price_override`, or without a reason. |
+| `DISCOUNT_FORBIDDEN` | 403 | Discount above the cashier limit without `sale.discount`. |
+| `TOTAL_MISMATCH` | 409 | The till's total is stale; re-quote and show the new total. |
+| `IDEMPOTENCY_CONFLICT` | 409 | A different request already used this id; generate a new id. |
+| `PAYMENT_INSUFFICIENT` | 400 | Payments don't cover the amount due. |
+| `PAYMENT_OVERPAID` | 400 | Payments exceed what's due; record cash change as tendered. |
+| `PAYMENT_REFERENCE_REQUIRED` | 400 | This method needs a transaction reference. |
+| `PAYMENT_METHOD_INVALID` | 400 | Unknown or inactive method, or one that can't be used here (store credit at checkout). |
+| `PAYMENT_METHOD_EXISTS` | 409 | Payment method code already in use. |
+| `DUPLICATE_PAYMENT_REFERENCE` | 409 | That reference is already on a live payment of this method. |
+| `INVALID_PAYMENT_TRANSITION` | 409 | The payment can't move to that status from where it is. |
+| `SALE_NOT_COMPLETED` | 409 | Returns and later payments need a completed (or awaiting-payment) sale. |
+| `SALE_NOT_VOIDABLE` | 409 | Shift closed, or goods already returned/refunded; use a return. |
+| `RETURN_QUANTITY_EXCEEDED` | 409 | More than is left to return on that line (message says how many). |
+| `ITEM_NOT_RETURNABLE` | 400 | The product is marked non-returnable. |
+| `REFUND_AMOUNT_EXCEEDED` | 409 | More than was paid and not yet refunded, on the sale or the payment. |
+| `RETURN_NOT_PENDING` | 409 | The return isn't waiting for approval. |
+| `APPROVAL_SELF_FORBIDDEN` | 403 | The person who started a return can't approve it. |
+| `CUSTOMER_REQUIRED` | 400 | Store credit needs a customer on the sale. |
+| `CUSTOMER_PHONE_EXISTS` | 409 | A customer with this phone already exists; look them up. |
+| `BARCODE_EXISTS` | 409 | The barcode is already assigned to a product. |
+| `ALREADY_EXISTS` | 409 | A record with these details exists (duplicate slug, SKU, unit, group or sale unit). |
+| `GROUP_IN_USE` | 409 | The customer group still has customers or price rules. |
+| `SHIFT_OPEN` | 409 | Close the store's open shift before deactivating the store. |
+| `PRODUCT_INACTIVE` | 409 | The product is deactivated (transfers). Adjustments are still allowed. |
+| `VALIDATION_FAILED` | 400 | A field is missing, blank, too long, malformed or out of range; the message names it. |
+| `INVALID_REFERENCE` | 400 | A referenced record does not exist. |
+| `INVALID_VALUE` | 400 | A value is outside what the database allows. |
+| `INVALID_REQUEST` | 400/415/422 | The body, path or query could not be read (bad JSON, wrong shape, wrong content type, unknown field). |
+| `ROUTE_NOT_FOUND` | 404 | No such endpoint. |
+| `METHOD_NOT_ALLOWED` | 405 | The endpoint exists but not for this HTTP method. |
 
 `403` responses without a code carry `Missing permission: <name>`.

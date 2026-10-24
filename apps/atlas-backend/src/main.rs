@@ -2,7 +2,7 @@
 // crate - see the coding-assistant skill's locked rule.
 #![allow(clippy::uninlined_format_args)]
 
-use atlas_backend::{api_router, app, build_state};
+use atlas_backend::{api_router, app, build_state, deliver_notifications};
 
 #[tokio::main]
 async fn main() {
@@ -17,6 +17,19 @@ async fn main() {
         .expect("failed to bind port");
 
     let state = build_state().await;
+
+    // Sends queued notification emails; each run picks up whatever is due
+    let worker_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if let Err(err) = deliver_notifications(&worker_state).await {
+                eprintln!("notification delivery run failed: {:?}", err);
+            }
+        }
+    });
+
     let router = app().merge(api_router(state));
 
     axum::serve(

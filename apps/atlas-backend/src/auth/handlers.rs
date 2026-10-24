@@ -6,6 +6,7 @@ use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::audit;
 use crate::crypto;
 use crate::error::{codes, ApiError};
 use crate::extractors::AdminTx;
@@ -365,6 +366,7 @@ pub async fn login(
     };
 
     let (access_token, refresh_token) = issue_session(&mut tx, user_id, tenant_id, &state).await?;
+    audit::record(&mut tx, tenant_id, user_id, "user", user_id, "auth.login", None).await?;
     tx.commit().await?;
 
     let user = AuthenticatedUser { id: user_id, full_name, email, email_verified: is_email_verified };
@@ -755,6 +757,7 @@ pub async fn switch_tenant(
             .await?;
 
     let (access_token, refresh_token) = issue_session(&mut tx, claims.sub, payload.tenant_id, &state).await?;
+    audit::record(&mut tx, payload.tenant_id, claims.sub, "user", claims.sub, "auth.switch_tenant", None).await?;
     tx.commit().await?;
 
     let authenticated_user = AuthenticatedUser { id: claims.sub, full_name: user.0, email: user.1, email_verified: user.2 };

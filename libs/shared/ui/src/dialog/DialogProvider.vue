@@ -16,6 +16,7 @@ import type {
   OpenDialog,
 } from './dialog-types';
 import { DIALOG_KEY } from './use-dialog';
+import { lockScroll, unlockScroll } from '../motion/smooth-scroll';
 import DialogFrame from './DialogFrame.vue';
 
 const props = defineProps<{
@@ -126,13 +127,22 @@ const removeGuard = router.afterEach(() => {
   closeAllDialogs();
 });
 
+let scrollLocked = false;
 watch(openDialogs, (stack: OpenDialog[]) => {
-  document.body.style.overflow = stack.length > 0 ? 'hidden' : '';
+  if (stack.length > 0 && !scrollLocked) {
+    lockScroll();
+    scrollLocked = true;
+  } else if (stack.length === 0 && scrollLocked) {
+    unlockScroll();
+    scrollLocked = false;
+  }
 });
 
 onBeforeUnmount(() => {
   removeGuard();
-  document.body.style.overflow = '';
+  if (scrollLocked) {
+    unlockScroll();
+  }
   window.removeEventListener('keydown', onEscape);
 });
 

@@ -9,6 +9,12 @@ export {
   registerScrollTrigger,
 } from './motion/presets';
 export { useScrollReveal } from './motion/use-scroll-reveal';
+export {
+  lockScroll,
+  syncSmoothScroll,
+  unlockScroll,
+} from './motion/smooth-scroll';
+export type { SmoothScroller } from './motion/smooth-scroll';
 
 export type {
   DialogContextValue,

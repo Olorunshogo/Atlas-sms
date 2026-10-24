@@ -320,6 +320,10 @@ async fn receiving_goods_creates_or_tops_up_batches(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK, "{}", order);
     let order_id = id_of(&order);
+    for step in ["submit", "approve"] {
+        let (status, body) = post(&p.router, &format!("/api/v1/purchase-orders/{}/{}", order_id, step), &caller, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{}", body);
+    }
     let (_, lines) = get(&p.router, &format!("/api/v1/purchase-orders/{}/lines", order_id), &caller).await;
     let line_id = lines["data"][0]["id"].as_str().unwrap().to_string();
     let receive = |batch_number: Option<&str>, quantity: &str| {

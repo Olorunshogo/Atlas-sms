@@ -3,6 +3,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::email::EmailProvider;
+use crate::integrations::Integrations;
 use crate::rate_limit::RateLimiter;
 
 // === AppState
@@ -17,4 +18,6 @@ pub struct AppState {
     pub email: Arc<dyn EmailProvider>,
     pub jwt_secret: Arc<Vec<u8>>,
     pub rate_limiter: RateLimiter,
+    /// Payment gateway, courier and social sign-in adapters (mocks until real ones are configured).
+    pub integrations: Integrations,
 }

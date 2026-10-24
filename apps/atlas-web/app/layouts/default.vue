@@ -8,6 +8,7 @@ import { DIALOG_REGISTRY } from '../providers/dialog-registry';
     <div
       class="bg-surface-canvas font-outfit text-ink-primary flex min-h-screen flex-col"
     >
+      <SmoothScroll />
       <SiteHeader />
       <div class="flex flex-1 flex-col">
         <slot />

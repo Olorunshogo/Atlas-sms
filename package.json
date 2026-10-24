@@ -53,6 +53,8 @@
     "deploy:landing:test": "pnpm --filter landing-page run deploy:test",
     "deploy:landing:prod": "pnpm --filter landing-page run deploy:prod",
     "dev:web": "nx dev atlas-web",
+    "dev:storefront": "nx dev atlas-storefront",
+    "build:storefront": "nx build atlas-storefront",
     "build:web": "nx build atlas-web",
     "preview:web": "nx preview atlas-web",
     "cf:project:create:web:test": "pnpm --filter atlas-web run cf:project:create:test",

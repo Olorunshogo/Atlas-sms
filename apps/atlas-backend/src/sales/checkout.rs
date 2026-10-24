@@ -456,9 +456,11 @@ async fn insert_lines(conn: &mut PgConnection, tenant_id: Uuid, sale_id: Uuid, p
                  quantity, base_quantity, list_unit_price_amount_minor, unit_price_amount_minor, price_rule_id,
                  price_overridden, price_override_reason, line_discount_amount_minor,
                  allocated_cart_discount_amount_minor, discount_reason, net_amount_minor, tax_rate_id,
-                 tax_rate_basis_points, tax_amount_minor, line_total_amount_minor)
+                 tax_rate_basis_points, tax_amount_minor, line_total_amount_minor, unit_cost_amount_minor)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                     $21, $22, $23, $24, $25)",
+                     $21, $22, $23, $24, $25,
+                     (SELECT l.cost_amount_minor FROM atlas.product_store_listings l
+                      WHERE l.product_id = $5 AND l.store_id = (SELECT store_id FROM atlas.sales WHERE id = $3)))",
         )
         .bind(line.client_line_id.unwrap_or_else(Uuid::now_v7))
         .bind(tenant_id)

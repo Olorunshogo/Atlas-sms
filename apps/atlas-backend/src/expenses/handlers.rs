@@ -1,6 +1,7 @@
 use axum::extract::{Path, Query};
 use axum::Json;
 
+use crate::approvals;
 use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
@@ -91,6 +92,7 @@ pub async fn approve_expense(Path(expense_id): Path<Uuid>, mut tx: TenantTx) -> 
     let user_id = tx.user_id;
     let existing = service::get_expense(&mut tx, expense_id).await?;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.store_id), "expense.manage").await?;
+    approvals::assert_may_approve(&mut tx, existing.store_id, user_id, existing.created_by_user_id).await?;
     let expense = service::approve_expense(&mut tx, tenant_id, user_id, expense_id).await?;
     audit::record(&mut tx, tenant_id, user_id, "expense", expense.id, "expense.approve", serde_json::to_value(&expense).ok()).await?;
     notifications::service::expense(&mut tx, tenant_id, user_id, expense.id, NotificationKind::ExpenseApproved).await;
@@ -103,6 +105,7 @@ pub async fn reject_expense(Path(expense_id): Path<Uuid>, mut tx: TenantTx) -> R
     let user_id = tx.user_id;
     let existing = service::get_expense(&mut tx, expense_id).await?;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, Some(existing.store_id), "expense.manage").await?;
+    approvals::assert_may_approve(&mut tx, existing.store_id, user_id, existing.created_by_user_id).await?;
     let expense = service::reject_expense(&mut tx, tenant_id, user_id, expense_id).await?;
     audit::record(&mut tx, tenant_id, user_id, "expense", expense.id, "expense.reject", serde_json::to_value(&expense).ok()).await?;
     notifications::service::expense(&mut tx, tenant_id, user_id, expense.id, NotificationKind::ExpenseRejected).await;

@@ -26,6 +26,8 @@ export const motionTokens = {
   modalEnterY: 12,
   modalExitDuration: 0.18,
   modalExitY: 8,
+  // Shorter than Lenis's 1.2s default, same as Celeris: snappy, not syrupy
+  smoothScrollDuration: 1,
 } as const;
 
 /** Elements a modal staggers in when it opens. */

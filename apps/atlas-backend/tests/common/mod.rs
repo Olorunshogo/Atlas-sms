@@ -27,6 +27,7 @@ pub fn build_router(pool: PgPool) -> Router {
         email: Arc::new(LogEmailProvider),
         jwt_secret: Arc::new(JWT_SECRET.to_vec()),
         rate_limiter: RateLimiter::with_limits(1000, std::time::Duration::from_secs(60)),
+        integrations: atlas_backend::integrations::Integrations::mock(b"test-webhook-secret"),
     };
     return api_router(state);
 }

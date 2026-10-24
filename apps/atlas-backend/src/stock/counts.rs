@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::approvals;
 use crate::audit;
 use crate::error::{codes, ApiError};
 use crate::extractors::TenantTx;
@@ -181,6 +182,7 @@ pub async fn approve_count(Path(count_id): Path<Uuid>, mut tx: TenantTx) -> Resu
     let existing = load(&mut tx, count_id).await?;
     assert_adjust(&mut tx, existing.store_id).await?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    approvals::assert_may_approve(&mut tx, existing.store_id, user_id, existing.created_by_user_id).await?;
     decide(&mut tx, count_id, user_id, "approved").await?;
 
     let lines: Vec<PostingLine> = existing

@@ -8,18 +8,24 @@ use axum::routing::get;
 use axum::Router;
 use sqlx::PgPool;
 
+mod approvals;
 mod audit;
+mod audit_log;
 mod auth;
 mod catalog;
 mod crypto;
+mod csv;
 mod customers;
 mod email;
 mod error;
 mod expenses;
 mod extractors;
+mod imports;
+pub mod integrations;
 mod inventory;
 mod normalize;
 mod notifications;
+mod operations;
 mod payments;
 mod pricing;
 mod products;
@@ -30,6 +36,7 @@ mod response;
 mod returns;
 pub mod roles;
 mod sales;
+pub mod shop;
 mod state;
 mod stock;
 mod stores;
@@ -62,13 +69,20 @@ pub async fn build_state() -> AppState {
         .expect("failed to connect to database");
 
     let jwt_secret = std::env::var("ATLAS_JWT_SECRET").expect("ATLAS_JWT_SECRET must be set");
+    let webhook_secret = std::env::var("ATLAS_WEBHOOK_SECRET").unwrap_or_else(|_| format!("{}:webhook", jwt_secret));
 
     return AppState {
         pool,
         email: Arc::new(LogEmailProvider),
         jwt_secret: Arc::new(jwt_secret.into_bytes()),
         rate_limiter: rate_limit::RateLimiter::new(),
+        integrations: integrations::Integrations::mock(webhook_secret.as_bytes()),
     };
+}
+
+/// One pass of the notification email worker (FR-26); `main` runs it on an interval, tests call it directly.
+pub async fn deliver_notifications(state: &AppState) -> Result<notifications::delivery::DeliveryRun, error::ApiError> {
+    return notifications::delivery::deliver_pending(&state.pool, state.email.as_ref()).await;
 }
 
 /// Single source of truth for the versioned path segment every route below nests under - bumping to `/api/v2` is a one-line change here, not nine hand-edits that can drift out of sync with each other.
@@ -95,6 +109,10 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/expense-categories", API_PREFIX), expenses::categories_router())
         .nest(&format!("{}/expenses", API_PREFIX), expenses::router())
         .nest(&format!("{}/notifications", API_PREFIX), notifications::router())
+        .nest(&format!("{}/audit-events", API_PREFIX), audit_log::router())
+        .nest(&format!("{}/operations", API_PREFIX), operations::router())
+        .nest(&format!("{}/imports", API_PREFIX), imports::imports_router())
+        .nest(&format!("{}/exports", API_PREFIX), imports::exports_router())
         .nest(&format!("{}/roles", API_PREFIX), roles::router())
         .nest(&format!("{}/product-types", API_PREFIX), products::product_types_router())
         .nest(&format!("{}/product-categories", API_PREFIX), products::categories_router())
@@ -105,6 +123,11 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/returns", API_PREFIX), returns::router())
         .nest(&format!("{}/sync", API_PREFIX), sync::router())
         .nest(&format!("{}/reports", API_PREFIX), reports::router())
+        .nest(&format!("{}/shop", API_PREFIX), shop::shop_router())
+        .nest(&format!("{}/storefronts", API_PREFIX), shop::storefronts_router())
+        .nest(&format!("{}/promotions", API_PREFIX), shop::promotions_router())
+        .nest(&format!("{}/shop-orders", API_PREFIX), shop::orders_router())
+        .nest(&format!("{}/shop-webhooks", API_PREFIX), shop::webhooks_router())
         .with_state(state)
         .layer(axum::middleware::from_fn(normalize::json_errors));
 }
@@ -114,9 +137,11 @@ mod tests {
     use std::collections::BTreeSet;
     use std::path::Path;
 
-    /// The source text of `pub fn name()` in a module's `mod.rs`, up to the next `pub fn`.
+    /// The source text of `pub fn name()` in a module's `mod.rs` (or its single `module.rs`), up to the next `pub fn`.
     fn router_body(module: &str, name: &str) -> String {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(module).join("mod.rs");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let nested = src.join(module).join("mod.rs");
+        let path = if nested.exists() { nested } else { src.join(format!("{}.rs", module)) };
         let source = std::fs::read_to_string(&path).unwrap();
         let start = source
             .find(&format!("pub fn {}(", name))

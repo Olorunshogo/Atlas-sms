@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue';
+import { lockScroll, unlockScroll } from '../motion/smooth-scroll';
 import DialogFrame from './DialogFrame.vue';
 import DialogHeader from './DialogHeader.vue';
 import { useModal } from './use-modal';
@@ -27,7 +28,6 @@ const body = useTemplateRef<HTMLElement>('body');
 const rendered = ref<boolean>(open.value);
 const closing = ref<boolean>(false);
 const frameKey = ref<number>(0);
-let previousOverflow = '';
 
 const { playEnter, requestClose } = useModal(open, body, {
   isBlocked: () => props.blocked,
@@ -40,13 +40,12 @@ function onEscape(event: KeyboardEvent): void {
 }
 
 function lockPage(): void {
-  previousOverflow = document.body.style.overflow;
-  document.body.style.overflow = 'hidden';
+  lockScroll();
   window.addEventListener('keydown', onEscape);
 }
 
 function unlockPage(): void {
-  document.body.style.overflow = previousOverflow;
+  unlockScroll();
   window.removeEventListener('keydown', onEscape);
 }
 

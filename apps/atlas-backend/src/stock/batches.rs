@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::approvals;
 use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
@@ -187,6 +188,7 @@ pub async fn write_off(mut tx: TenantTx, Json(body): Json<WriteOffRequest>) -> R
     let reason = required_text("reason", &body.reason, 500)?;
     inventory::batches::check_batch_given(&mut tx, body.product_id, body.stock_item_id).await?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    approvals::assert_within_threshold(&mut tx, tenant_id, body.store_id, user_id, approvals::Threshold::WriteOff, body.quantity).await?;
 
     let lines = [PostingLine { product_id: body.product_id, stock_item_id: body.stock_item_id, unit_id: None, quantity: body.quantity }];
     let movements = inventory::service::post(

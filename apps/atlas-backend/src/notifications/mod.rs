@@ -1,4 +1,6 @@
+pub mod delivery;
 mod handlers;
+mod preferences;
 pub mod models;
 pub mod service;
 
@@ -13,6 +15,7 @@ pub fn router() -> Router<AppState> {
     return Router::new()
         .route("/", get(handlers::list_notifications))
         .route("/unread-count", get(handlers::unread_count))
+        .route("/preferences", get(preferences::get_preferences).put(preferences::set_preferences))
         .route("/read-all", post(handlers::mark_all_read))
         .route("/{id}/read", post(handlers::mark_read));
 }

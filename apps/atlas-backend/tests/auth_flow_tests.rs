@@ -73,6 +73,7 @@ fn build_router_with_limiter(pool: PgPool, email: CapturingEmailProvider, rate_l
         email: Arc::new(email),
         jwt_secret: Arc::new(b"test-only-secret-not-for-production".to_vec()),
         rate_limiter,
+        integrations: atlas_backend::integrations::Integrations::mock(b"test-webhook-secret"),
     };
     return api_router(state);
 }

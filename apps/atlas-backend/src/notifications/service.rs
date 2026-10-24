@@ -30,15 +30,43 @@ async fn begin<'c>(conn: &'c mut PgConnection, what: &str) -> Option<Transaction
     };
 }
 
-async fn finish(savepoint: Transaction<'_, Postgres>, result: Result<(), ApiError>, what: &str) {
+/// Returns what went wrong, if anything, so the caller can leave an operational issue behind (FR-30).
+async fn finish(savepoint: Transaction<'_, Postgres>, result: Result<(), ApiError>, what: &str) -> Option<String> {
     match result {
-        Ok(()) => {
-            if let Err(err) = savepoint.commit().await {
+        Ok(()) => match savepoint.commit().await {
+            Ok(()) => None,
+            Err(err) => {
                 eprintln!("notification {} not saved: {}", what, err);
+                Some(format!("{} notification not saved: {}", what, err))
             }
-        }
+        },
         Err(err) => {
             eprintln!("notification {} dropped: {:?}", what, err);
+            let _ = savepoint.rollback().await;
+            Some(format!("{} notification dropped: {:?}", what, err))
+        }
+    }
+}
+
+/// Best effort, in its own savepoint: failing to record the failure must not fail the request either.
+pub async fn record_issue(conn: &mut PgConnection, tenant_id: Uuid, kind: &str, detail: &str, reference_id: Option<Uuid>) {
+    let Ok(mut savepoint) = conn.begin().await else { return };
+    let inserted = sqlx::query(
+        "INSERT INTO atlas.operational_issues (id, tenant_id, kind, detail, reference_id) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(tenant_id)
+    .bind(kind)
+    .bind(detail)
+    .bind(reference_id)
+    .execute(&mut *savepoint)
+    .await;
+    match inserted {
+        Ok(_) => {
+            let _ = savepoint.commit().await;
+        }
+        Err(err) => {
+            eprintln!("operational issue not recorded: {}", err);
             let _ = savepoint.rollback().await;
         }
     }
@@ -111,14 +139,29 @@ async fn write_event(conn: &mut PgConnection, event: &Event) -> Result<(), ApiEr
     .await?;
     let Some(notification_id) = notification_id else { return Ok(()) };
 
+    // No preference row means in-app on, email off
     let users: Vec<Uuid> = users.into_iter().collect();
     sqlx::query(
         "INSERT INTO atlas.notification_recipients (notification_id, user_id, tenant_id)
-         SELECT $1, user_id, $2 FROM UNNEST($3::uuid[]) AS user_id",
+         SELECT $1, u.user_id, $2 FROM UNNEST($3::uuid[]) AS u(user_id)
+         LEFT JOIN atlas.notification_preferences p ON p.user_id = u.user_id AND p.tenant_id = $2 AND p.kind = $4
+         WHERE COALESCE(p.in_app, true)",
     )
     .bind(notification_id)
     .bind(event.tenant_id)
     .bind(&users)
+    .bind(event.kind)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "INSERT INTO atlas.notification_deliveries (id, tenant_id, notification_id, user_id)
+         SELECT gen_random_uuid(), $2, $1, p.user_id FROM atlas.notification_preferences p
+         WHERE p.user_id = ANY($3) AND p.tenant_id = $2 AND p.kind = $4 AND p.email",
+    )
+    .bind(notification_id)
+    .bind(event.tenant_id)
+    .bind(&users)
+    .bind(event.kind)
     .execute(&mut *conn)
     .await?;
     return Ok(());
@@ -134,7 +177,9 @@ async fn write_event(conn: &mut PgConnection, event: &Event) -> Result<(), ApiEr
 pub async fn check_low_stock(conn: &mut PgConnection, tenant_id: Uuid, store_id: Uuid, changes: &[(Uuid, Decimal)]) {
     let Some(mut savepoint) = begin(conn, "low stock").await else { return };
     let result = write_low_stock(&mut savepoint, tenant_id, store_id, changes).await;
-    finish(savepoint, result, "low stock").await;
+    if let Some(error) = finish(savepoint, result, "low stock").await {
+        record_issue(conn, tenant_id, "notification_failed", &error, None).await;
+    }
 }
 
 async fn write_low_stock(conn: &mut PgConnection, tenant_id: Uuid, store_id: Uuid, changes: &[(Uuid, Decimal)]) -> Result<(), ApiError> {
@@ -198,7 +243,9 @@ async fn write_low_stock(conn: &mut PgConnection, tenant_id: Uuid, store_id: Uui
 pub async fn transfer(conn: &mut PgConnection, tenant_id: Uuid, actor_user_id: Uuid, transfer_id: Uuid, kind: NotificationKind) {
     let Some(mut savepoint) = begin(conn, "transfer").await else { return };
     let result = write_transfer(&mut savepoint, tenant_id, actor_user_id, transfer_id, kind).await;
-    finish(savepoint, result, "transfer").await;
+    if let Some(error) = finish(savepoint, result, "transfer").await {
+        record_issue(conn, tenant_id, "notification_failed", &error, Some(transfer_id)).await;
+    }
 }
 
 async fn write_transfer(
@@ -252,7 +299,9 @@ async fn write_transfer(
 pub async fn stock_count(conn: &mut PgConnection, tenant_id: Uuid, actor_user_id: Uuid, count_id: Uuid, kind: NotificationKind) {
     let Some(mut savepoint) = begin(conn, "stock count").await else { return };
     let result = write_stock_count(&mut savepoint, tenant_id, actor_user_id, count_id, kind).await;
-    finish(savepoint, result, "stock count").await;
+    if let Some(error) = finish(savepoint, result, "stock count").await {
+        record_issue(conn, tenant_id, "notification_failed", &error, Some(count_id)).await;
+    }
 }
 
 async fn write_stock_count(
@@ -291,20 +340,23 @@ async fn write_stock_count(
 
 // === Purchase orders (FR-21)
 
-pub async fn purchase_order_submitted(conn: &mut PgConnection, tenant_id: Uuid, actor_user_id: Uuid, purchase_order_id: Uuid) {
+pub async fn purchase_order(conn: &mut PgConnection, tenant_id: Uuid, actor_user_id: Uuid, purchase_order_id: Uuid, kind: NotificationKind) {
     let Some(mut savepoint) = begin(conn, "purchase order").await else { return };
-    let result = write_purchase_order_submitted(&mut savepoint, tenant_id, actor_user_id, purchase_order_id).await;
-    finish(savepoint, result, "purchase order").await;
+    let result = write_purchase_order(&mut savepoint, tenant_id, actor_user_id, purchase_order_id, kind).await;
+    if let Some(error) = finish(savepoint, result, "purchase order").await {
+        record_issue(conn, tenant_id, "notification_failed", &error, Some(purchase_order_id)).await;
+    }
 }
 
-async fn write_purchase_order_submitted(
+async fn write_purchase_order(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     actor_user_id: Uuid,
     purchase_order_id: Uuid,
+    kind: NotificationKind,
 ) -> Result<(), ApiError> {
-    let (store_id, supplier_name, store_name): (Uuid, String, String) = sqlx::query_as(
-        "SELECT po.store_id, sup.name, s.name
+    let (store_id, created_by, supplier_name, store_name): (Uuid, Uuid, String, String) = sqlx::query_as(
+        "SELECT po.store_id, po.created_by_user_id, sup.name, s.name
          FROM atlas.purchase_orders po
          JOIN atlas.suppliers sup ON sup.id = po.supplier_id
          JOIN atlas.stores s ON s.id = po.store_id
@@ -314,16 +366,30 @@ async fn write_purchase_order_submitted(
     .fetch_one(&mut *conn)
     .await?;
 
+    let (title, body, audience) = match kind {
+        NotificationKind::PurchaseOrderSubmitted => (
+            "Purchase order awaiting approval",
+            format!("Order to {} for {} needs approving.", supplier_name, store_name),
+            vec![Audience::Permission { permission: "purchase.approve", store_id }],
+        ),
+        NotificationKind::PurchaseOrderApproved => (
+            "Purchase order approved",
+            format!("Order to {} for {} is approved and can be received.", supplier_name, store_name),
+            vec![Audience::User(created_by)],
+        ),
+        _ => return Ok(()),
+    };
+
     let event = Event {
         tenant_id,
         store_id: Some(store_id),
-        kind: NotificationKind::PurchaseOrderSubmitted,
-        title: "Purchase order submitted".to_string(),
-        body: format!("Order to {} for {} is placed and awaiting goods.", supplier_name, store_name),
+        kind,
+        title: title.to_string(),
+        body,
         entity_type: "purchase_order",
         entity_id: purchase_order_id,
         dedupe_key: None,
-        audience: vec![Audience::Permission { permission: "purchase.create", store_id }],
+        audience,
         exclude_user_id: Some(actor_user_id),
     };
     return write_event(conn, &event).await;
@@ -334,7 +400,9 @@ async fn write_purchase_order_submitted(
 pub async fn expense(conn: &mut PgConnection, tenant_id: Uuid, actor_user_id: Uuid, expense_id: Uuid, kind: NotificationKind) {
     let Some(mut savepoint) = begin(conn, "expense").await else { return };
     let result = write_expense(&mut savepoint, tenant_id, actor_user_id, expense_id, kind).await;
-    finish(savepoint, result, "expense").await;
+    if let Some(error) = finish(savepoint, result, "expense").await {
+        record_issue(conn, tenant_id, "notification_failed", &error, Some(expense_id)).await;
+    }
 }
 
 async fn write_expense(

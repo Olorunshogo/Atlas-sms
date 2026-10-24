@@ -118,6 +118,7 @@ watch(
       ref="panel"
       role="dialog"
       :aria-modal="isTop"
+      data-lenis-prevent
       tabindex="-1"
       class="border-border-soft bg-surface-canvas pointer-events-auto flex max-h-[calc(100dvh-3rem)] w-full flex-col gap-6 overflow-y-auto rounded-t-2xl border p-6 opacity-0 outline-none motion-reduce:opacity-100 lg:max-w-xl lg:rounded-2xl"
     >

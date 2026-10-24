@@ -23,6 +23,7 @@ fn build_router(pool: PgPool) -> Router {
         email: Arc::new(LogEmailProvider),
         jwt_secret: Arc::new(b"test-only-secret-not-for-production".to_vec()),
         rate_limiter: RateLimiter::with_limits(1000, std::time::Duration::from_secs(60)),
+        integrations: atlas_backend::integrations::Integrations::mock(b"test-webhook-secret"),
     };
     return api_router(state);
 }
@@ -245,6 +246,7 @@ async fn a_purchase_order_moves_from_draft_to_partially_received_to_received(poo
     assert_eq!(status, StatusCode::OK);
     let purchase_order_id = po_body["data"]["id"].as_str().unwrap().to_string();
     assert_eq!(po_body["data"]["status"], "draft");
+    approve_order(&router, &token, &purchase_order_id).await;
 
     let (status, lines_body) =
         get(&router, &format!("/api/v1/purchase-orders/{}/lines", purchase_order_id), &token).await;
@@ -253,15 +255,16 @@ async fn a_purchase_order_moves_from_draft_to_partially_received_to_received(poo
     assert_eq!(lines.len(), 1);
     let line_id = lines[0]["id"].as_str().unwrap().to_string();
 
-    // Receiving more than was ordered on this line is rejected...
-    let (status, _) = post(
+    // Receiving more than was ordered on this line is rejected without a recorded exception...
+    let (status, body) = post(
         &router,
         &format!("/api/v1/purchase-orders/{}/receive", purchase_order_id),
         Some(&token),
         json!({ "lines": [{ "purchase_order_line_id": line_id, "quantity_received": "11" }] }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "RECEIPT_EXCEEDS_OUTSTANDING");
 
     // ...a short shipment is accepted and moves the order to partially_received.
     let (status, receive_body) = post(
@@ -339,9 +342,12 @@ async fn a_draft_order_can_be_edited_and_submitted_but_not_edited_after(pool: Pg
 
     let (status, submit_body) = post(&router, &format!("/api/v1/purchase-orders/{}/submit", purchase_order_id), Some(&token), json!({})).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(submit_body["data"]["status"], "ordered");
+    assert_eq!(submit_body["data"]["status"], "submitted");
+    let (status, approve_body) = post(&router, &format!("/api/v1/purchase-orders/{}/approve", purchase_order_id), Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approve_body["data"]["status"], "ordered");
 
-    // Can't edit or re-submit once ordered.
+    // Can't edit or re-submit once approved.
     let (status, error_body) = patch(
         &router,
         &format!("/api/v1/purchase-orders/{}", purchase_order_id),
@@ -374,7 +380,7 @@ async fn an_ordered_po_can_be_cancelled_but_a_received_one_cannot(pool: PgPool) 
     )
     .await;
     let cancellable_id = po_body["data"]["id"].as_str().unwrap().to_string();
-    post(&router, &format!("/api/v1/purchase-orders/{}/submit", cancellable_id), Some(&token), json!({})).await;
+    approve_order(&router, &token, &cancellable_id).await;
     let (status, cancel_body) = post(&router, &format!("/api/v1/purchase-orders/{}/cancel", cancellable_id), Some(&token), json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cancel_body["data"]["status"], "cancelled");
@@ -387,6 +393,7 @@ async fn an_ordered_po_can_be_cancelled_but_a_received_one_cannot(pool: PgPool) 
     )
     .await;
     let received_id = po_body["data"]["id"].as_str().unwrap().to_string();
+    approve_order(&router, &token, &received_id).await;
     let (_, lines_body) = get(&router, &format!("/api/v1/purchase-orders/{}/lines", received_id), &token).await;
     let line_id = lines_body["data"].as_array().unwrap()[0]["id"].as_str().unwrap().to_string();
     post(
@@ -419,6 +426,7 @@ async fn a_purchase_return_reduces_stock_and_supplier_balance_but_not_past_what_
     )
     .await;
     let purchase_order_id = po_body["data"]["id"].as_str().unwrap().to_string();
+    approve_order(&router, &token, &purchase_order_id).await;
     let (_, lines_body) = get(&router, &format!("/api/v1/purchase-orders/{}/lines", purchase_order_id), &token).await;
     let line_id = lines_body["data"].as_array().unwrap()[0]["id"].as_str().unwrap().to_string();
     let (_, receive_body) = post(
@@ -457,6 +465,16 @@ async fn a_purchase_return_reduces_stock_and_supplier_balance_but_not_past_what_
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(return_body["data"]["lines"][0]["quantity"], "3");
+    assert_eq!(return_body["data"]["status"], "pending");
+    assert_eq!(return_body["data"]["total_amount_minor"], 1500);
+
+    // Nothing moves until it is confirmed
+    let (_, stock_body) = get(&router, &format!("/api/v1/stock/on-hand?store_id={}", store_id), &token).await;
+    assert_eq!(stock_body["data"][0]["on_hand"], "10");
+    let return_id = return_body["data"]["id"].as_str().unwrap().to_string();
+    let (status, confirm_body) = post(&router, &format!("/api/v1/purchase-returns/{}/confirm", return_id), Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", confirm_body);
+    assert_eq!(confirm_body["data"]["status"], "confirmed");
 
     let (_, stock_body) = get(&router, &format!("/api/v1/stock/on-hand?store_id={}", store_id), &token).await;
     assert_eq!(stock_body["data"][0]["on_hand"], "7");
@@ -476,6 +494,15 @@ async fn a_purchase_return_reduces_stock_and_supplier_balance_but_not_past_what_
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(error_body["code"], "RETURN_QUANTITY_EXCEEDED");
+}
+
+/// Submits then approves, so the order can be received.
+async fn approve_order(router: &Router, token: &str, purchase_order_id: &str) {
+    let (status, body) = post(router, &format!("/api/v1/purchase-orders/{}/submit", purchase_order_id), Some(token), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let (status, body) = post(router, &format!("/api/v1/purchase-orders/{}/approve", purchase_order_id), Some(token), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["status"], "ordered");
 }
 
 // === Payments

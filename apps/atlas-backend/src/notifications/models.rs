@@ -14,6 +14,7 @@ pub enum NotificationKind {
     TransferReceived,
     StockCountSubmitted,
     PurchaseOrderSubmitted,
+    PurchaseOrderApproved,
     ExpenseSubmitted,
     ExpenseApproved,
     ExpenseRejected,

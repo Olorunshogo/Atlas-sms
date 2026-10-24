@@ -15,6 +15,7 @@ async function onVerified(): Promise<void> {
     <div
       class="bg-surface-canvas font-outfit text-ink-primary flex min-h-screen flex-col"
     >
+      <SmoothScroll />
       <SiteHeader />
       <div class="flex flex-1 flex-col">
         <EmailVerificationGate

@@ -47,10 +47,18 @@ pub struct Change<'a> {
 
 /// The full form of `record`, for edits where the prior state matters (customer updates, price drift on a synced sale) and for actions tied to a specific till.
 pub async fn record_change(conn: &mut PgConnection, change: Change<'_>) -> Result<(), ApiError> {
+    // The store is read off the snapshot, so every call site tags it without passing it (FR-27 store filter)
     sqlx::query(
         "INSERT INTO atlas.audit_events
-            (id, tenant_id, actor_user_id, device_id, entity_type, entity_id, action, before, after)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            (id, tenant_id, actor_user_id, device_id, entity_type, entity_id, action, before, after, store_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+                 COALESCE(
+                     CASE WHEN $5 = 'store' THEN $6 END,
+                     NULLIF($9->>'store_id', '')::uuid,
+                     NULLIF($8->>'store_id', '')::uuid,
+                     NULLIF($9->>'from_store_id', '')::uuid,
+                     NULLIF($8->>'from_store_id', '')::uuid
+                 ))",
     )
     .bind(Uuid::now_v7())
     .bind(change.tenant_id)
