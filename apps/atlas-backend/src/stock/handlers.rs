@@ -1,6 +1,8 @@
 use axum::extract::{Path, Query};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::approvals;
@@ -48,11 +50,12 @@ pub async fn get_stock_on_hand(
 /**
  * `POST /api/v1/stock/adjustments`.
  * Requires `stock.adjust` at the store named in the body - a stock count correction or damage write-off.
+ * Past the store's `stock_adjustment` policy without `stock.approve`, it's held: `202` with the approval request.
  */
 pub async fn adjust_stock(
     mut tx: TenantTx,
     Json(body): Json<AdjustStockRequest>,
-) -> Result<Json<ApiEnvelope<StockMovement>>, ApiError> {
+) -> Result<Response, ApiError> {
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
     roles::service::assert_permission(
@@ -63,20 +66,51 @@ pub async fn adjust_stock(
         "stock.adjust",
     )
     .await?;
-    approvals::assert_within_threshold(&mut tx, tenant_id, body.store_id, user_id, approvals::Threshold::Adjustment, body.quantity).await?;
-    let movement = service::adjust_stock(&mut tx, tenant_id, user_id, &body).await?;
+    let measure = approvals::Measure::Quantity(body.quantity);
+    if approvals::needs_approval(&mut tx, tenant_id, Some(body.store_id), user_id, approvals::Operation::StockAdjustment, measure).await? {
+        crate::inventory::batches::check_batch_given(&mut tx, body.product_id, body.stock_item_id).await?;
+        let held = approvals::hold(
+            &mut tx,
+            approvals::Hold {
+                tenant_id,
+                store_id: Some(body.store_id),
+                operation: approvals::Operation::StockAdjustment,
+                subject_id: body.product_id,
+                payload: serde_json::to_value(&body).map_err(|e| ApiError::Internal(e.to_string()))?,
+                summary: format!("Adjust stock by {}: {}", body.quantity.normalize(), body.reason),
+                requested_by_user_id: user_id,
+                message: "Adjustment held for approval.",
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok(held);
+    }
+    let movement = apply_adjustment(&mut tx, tenant_id, user_id, &body, None).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Stock adjusted.", movement)).into_response());
+}
+
+/// Posts the adjustment and its audit row. Also how an approved request applies, with `approval` set.
+pub async fn apply_adjustment(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    body: &AdjustStockRequest,
+    approval: Option<audit::Approval>,
+) -> Result<StockMovement, ApiError> {
+    let movement = service::adjust_stock(conn, tenant_id, user_id, body).await?;
     audit::record(
-        &mut tx,
+        conn,
         tenant_id,
         user_id,
         "stock_movement",
         movement.id,
         "stock.adjust",
-        serde_json::to_value(&movement).ok(),
+        audit::with_approval(serde_json::to_value(&movement).ok(), approval),
     )
     .await?;
-    tx.commit().await?;
-    return Ok(Json(ApiEnvelope::ok("Stock adjusted.", movement)));
+    return Ok(movement);
 }
 
 // === Inter-store transfers (FR-22)

@@ -189,7 +189,7 @@ async fn cashier_returns_and_large_refunds_need_approval(pool: PgPool) {
     let s = shop(&pool, "approval-owner@example.com").await;
     let (_, cashier) = seed_staff(&pool, s.tenant_id, s.store, "cashier").await;
     let (_, manager) = seed_staff(&pool, s.tenant_id, s.store, "store_manager").await;
-    store_settings(&s.router, &s.owner, s.store, json!({ "refund_approval_threshold_minor": 150_000 })).await;
+    approval_policy(&s.router, &s.owner, Some(s.store), "refund", json!({ "limit_amount_minor": 150_000 })).await;
     let (sale_id, line_id) = sell(&s, &cashier, "3", vec![pay(s.cash, 300_000)], None).await;
     let path = format!("/api/v1/sales/{}/returns", sale_id);
 
@@ -206,7 +206,7 @@ async fn cashier_returns_and_large_refunds_need_approval(pool: PgPool) {
     let (status, body) = post(&s.router, &path, &as_user(&manager), return_request(&line_id, "1", "resellable", "original")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["status"], "completed");
-    store_settings(&s.router, &s.owner, s.store, json!({ "refund_approval_threshold_minor": 100_000 })).await;
+    approval_policy(&s.router, &s.owner, Some(s.store), "refund", json!({ "limit_amount_minor": 100_000 })).await;
     let (status, body) = post(&s.router, &path, &as_user(&manager), return_request(&line_id, "1", "resellable", "original")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["status"], "pending_approval");
@@ -314,4 +314,61 @@ async fn a_replayed_return_is_recorded_once(pool: PgPool) {
     // Voiding is closed once goods have come back.
     let (status, _) = post(&s.router, &format!("/api/v1/sales/{}/void", sale_id), &caller, json!({ "reason": "Oops" })).await;
     assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[sqlx::test]
+async fn store_credit_is_spent_at_checkout_and_comes_back_on_refund_or_void(pool: PgPool) {
+    let s = shop(&pool, "credit-spend-owner@example.com").await;
+    let caller = as_user(&s.owner);
+    let credit = method_id(&s.router, &s.owner, "store_credit").await;
+    let (_, customer) = post(&s.router, "/api/v1/customers", &caller, json!({ "full_name": "Ngozi" })).await;
+    let customer_id = id_of(&customer);
+    let balance = || async {
+        let (_, body) = get(&s.router, &format!("/api/v1/customers/{}", customer_id), &caller).await;
+        body["data"]["store_credit_amount_minor"].as_i64().unwrap()
+    };
+    let (sale_id, line_id) = sell(&s, &s.owner, "1", vec![pay(s.cash, 100_000)], Some(&customer_id)).await;
+    post(&s.router, &format!("/api/v1/sales/{}/returns", sale_id), &caller, return_request(&line_id, "1", "resellable", "store_credit")).await;
+    assert_eq!(balance().await, 100_000);
+
+    let (spent_sale, spent_line) = sell(&s, &s.owner, "1", vec![pay(credit, 60_000), pay(s.cash, 40_000)], Some(&customer_id)).await;
+    assert_eq!(balance().await, 40_000);
+
+    // A short balance fails the whole sale; a walk-in has no balance to spend
+    let mut short = sale_request(s.store, s.shift, vec![cart_line(s.kettle, s.each, "1")], vec![pay(credit, 50_000), pay(s.cash, 50_000)]);
+    short["customer_id"] = json!(customer_id);
+    let (status, body) = post(&s.router, "/api/v1/sales", &caller, short).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{}", body);
+    assert_eq!(body["code"], "INSUFFICIENT_STORE_CREDIT");
+    assert_eq!(balance().await, 40_000);
+    let walk_in = sale_request(s.store, s.shift, vec![cart_line(s.kettle, s.each, "1")], vec![pay(credit, 100_000)]);
+    let (status, body) = post(&s.router, "/api/v1/sales", &caller, walk_in).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "CUSTOMER_REQUIRED");
+
+    // An offline till can't check the balance
+    let mut offline = sale_request(s.store, s.shift, vec![cart_line(s.kettle, s.each, "1")], vec![pay(credit, 100_000)]);
+    offline["customer_id"] = json!(customer_id);
+    let (status, body) = post(&s.router, "/api/v1/sync/sales", &caller, offline).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{}", body);
+    assert_eq!(body["code"], "PAYMENT_METHOD_INVALID");
+
+    // Refunded to the original methods, the credit part goes back to the balance
+    let (status, body) = post(&s.router, &format!("/api/v1/sales/{}/returns", spent_sale), &caller, return_request(&spent_line, "1", "resellable", "original")).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(balance().await, 100_000);
+
+    // Voiding a sale paid in credit gives it all back
+    let (all_credit, _) = sell(&s, &s.owner, "1", vec![pay(credit, 100_000)], Some(&customer_id)).await;
+    assert_eq!(balance().await, 0);
+    let (status, body) = post(&s.router, &format!("/api/v1/sales/{}/void", all_credit), &caller, json!({ "reason": "Wrong item" })).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(balance().await, 100_000);
+
+    let ledger: i64 = sqlx::query_scalar("SELECT SUM(amount_minor)::bigint FROM atlas.customer_credit_movements WHERE customer_id = $1::uuid")
+        .bind(&customer_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ledger, 100_000, "the ledger explains the balance");
 }

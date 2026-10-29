@@ -72,6 +72,22 @@ pub async fn record_issue(conn: &mut PgConnection, tenant_id: Uuid, kind: &str, 
     }
 }
 
+/// For a failure that also fails the request: its transaction rolls back, so the issue goes on a connection of its own (FR-30).
+pub async fn record_issue_detached(pool: &sqlx::PgPool, tenant_id: Uuid, kind: &str, detail: &str, reference_id: Option<Uuid>) {
+    let Ok(mut tx) = pool.begin().await else { return };
+    let scoped = sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
+        .bind(tenant_id.to_string())
+        .execute(&mut *tx)
+        .await;
+    if scoped.is_err() {
+        return;
+    }
+    record_issue(&mut tx, tenant_id, kind, detail, reference_id).await;
+    if let Err(err) = tx.commit().await {
+        eprintln!("operational issue not recorded: {}", err);
+    }
+}
+
 // === Writing
 
 async fn recipients(conn: &mut PgConnection, event: &Event) -> Result<BTreeSet<Uuid>, ApiError> {
@@ -100,6 +116,20 @@ async fn recipients(conn: &mut PgConnection, event: &Event) -> Result<BTreeSet<U
                 .bind(permission)
                 .bind(event.tenant_id)
                 .bind(store_id)
+                .fetch_all(&mut *conn)
+                .await?;
+                users.extend(holders);
+            }
+            Audience::TenantPermission { permission } => {
+                let holders: Vec<Uuid> = sqlx::query_scalar(
+                    "SELECT DISTINCT rg.user_id
+                     FROM atlas.role_grants rg
+                     JOIN atlas.roles r ON r.id = rg.role_id
+                     WHERE rg.status = 'active' AND rg.scope = 'tenant' AND rg.tenant_id = $2
+                       AND $1::atlas.permission = ANY(r.permissions)",
+                )
+                .bind(permission)
+                .bind(event.tenant_id)
                 .fetch_all(&mut *conn)
                 .await?;
                 users.extend(holders);
@@ -437,6 +467,58 @@ async fn write_expense(
         body: format!("{} ({}.{:02}) at {}.", description, amount_minor / 100, amount_minor % 100, store_name),
         entity_type: "expense",
         entity_id: expense_id,
+        dedupe_key: None,
+        audience,
+        exclude_user_id: Some(actor_user_id),
+    };
+    return write_event(conn, &event).await;
+}
+
+// === Approval requests (FR-09, FR-29)
+
+pub async fn approval(conn: &mut PgConnection, tenant_id: Uuid, actor_user_id: Uuid, request_id: Uuid, kind: NotificationKind) {
+    let Some(mut savepoint) = begin(conn, "approval").await else { return };
+    let result = write_approval(&mut savepoint, tenant_id, actor_user_id, request_id, kind).await;
+    if let Some(error) = finish(savepoint, result, "approval").await {
+        record_issue(conn, tenant_id, "notification_failed", &error, Some(request_id)).await;
+    }
+}
+
+async fn write_approval(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    actor_user_id: Uuid,
+    request_id: Uuid,
+    kind: NotificationKind,
+) -> Result<(), ApiError> {
+    let (store_id, operation, status, summary, requested_by): (Option<Uuid>, String, String, String, Uuid) = sqlx::query_as(
+        "SELECT store_id, operation::text, status::text, summary, requested_by_user_id FROM atlas.approval_requests WHERE id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let permission = if operation == "price_change" { "price.approve" } else { "stock.approve" };
+
+    let (title, audience) = match kind {
+        NotificationKind::ApprovalRequested => (
+            "Approval needed".to_string(),
+            vec![match store_id {
+                Some(store_id) => Audience::Permission { permission, store_id },
+                None => Audience::TenantPermission { permission },
+            }],
+        ),
+        NotificationKind::ApprovalDecided => (format!("Request {}", status), vec![Audience::User(requested_by)]),
+        _ => return Ok(()),
+    };
+
+    let event = Event {
+        tenant_id,
+        store_id,
+        kind,
+        title,
+        body: summary,
+        entity_type: "approval_request",
+        entity_id: request_id,
         dedupe_key: None,
         audience,
         exclude_user_id: Some(actor_user_id),

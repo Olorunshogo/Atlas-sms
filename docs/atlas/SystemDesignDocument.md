@@ -471,7 +471,7 @@ POST /api/v1/sales/{id}/returns { id, reason_code, lines[], refund{method} }
           (the last unit takes whatever is left, so no kobo leaks).
        4. Total must fit within paid - refunded - pending returns.
        5. Needs approval when outside the store's window (end of the Nth
-          local day), at or over refund_approval_threshold_minor, or when
+          local day), at or over the store's refund approval policy, or when
           the requester lacks sale.refund -> pending_approval, quantities
           reserved. Otherwise complete now.
   -> complete: return number, inventory::service::post(SaleReturn) for

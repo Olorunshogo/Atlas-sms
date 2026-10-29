@@ -83,8 +83,14 @@ pub async fn edit_purchase_order(
     let store_id = service::purchase_order_store_id(&mut tx, purchase_order_id).await?;
     assert_at(&mut tx, store_id, "purchase.create").await?;
     let tenant_id = tx.tenant_id;
+    let before = audit::snapshot(&mut tx, "purchase_orders", "id", purchase_order_id).await?;
     let order = service::edit_purchase_order(&mut tx, tenant_id, purchase_order_id, &body).await?;
-    audit_order(&mut tx, &order, "purchase_order.edit").await?;
+    let user_id = tx.user_id;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "purchase_order", entity_id: order.id, action: "purchase_order.edit", table: "purchase_orders", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Purchase order updated.", order)));
 }

@@ -19,5 +19,9 @@ pub fn router() -> Router<AppState> {
         .route("/sales-by-product", get(business::sales_by_product))
         .route("/inventory-valuation", get(business::inventory_valuation))
         .route("/purchases-by-supplier", get(business::purchases_by_supplier))
-        .route("/expenses-by-category", get(business::expenses_by_category));
+        .route("/expenses-by-category", get(business::expenses_by_category))
+        .route("/stock-movements", get(business::stock_movements))
+        .route("/transfers", get(business::transfers))
+        .route("/returns", get(business::returns))
+        .route("/payments-by-method", get(business::payments_by_method));
 }

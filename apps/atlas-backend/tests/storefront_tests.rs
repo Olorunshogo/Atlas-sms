@@ -6,7 +6,9 @@ mod common;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use atlas_backend::integrations::{mock_signature, Integrations};
+use atlas_backend::integrations::{
+    mock_signature, CourierProvider, IntegrationError, Integrations, ShipmentBooking, ShipmentEvent, ShipmentRequest,
+};
 use atlas_backend::shop::{COURIER_SIGNATURE_HEADER, PAYMENT_SIGNATURE_HEADER};
 use atlas_backend::{api_router, AppState, EmailError, EmailProvider, RateLimiter};
 use axum::body::Body;
@@ -44,14 +46,32 @@ impl Mailbox {
     }
 }
 
-fn router_with(pool: PgPool, mailbox: Mailbox) -> Router {
+fn router_with(pool: PgPool, mailbox: Mailbox, integrations: Integrations) -> Router {
     return api_router(AppState {
         pool,
         email: Arc::new(mailbox),
         jwt_secret: Arc::new(JWT_SECRET.to_vec()),
         rate_limiter: RateLimiter::with_limits(1000, std::time::Duration::from_secs(60)),
-        integrations: Integrations::mock(WEBHOOK_SECRET),
+        integrations,
     });
+}
+
+/// A courier that turns every shipment down, for the FR-30 integration-failure path.
+struct RefusingCourier;
+
+#[async_trait::async_trait]
+impl CourierProvider for RefusingCourier {
+    fn name(&self) -> &'static str {
+        return "refusing";
+    }
+
+    async fn create_shipment(&self, _request: &ShipmentRequest) -> Result<ShipmentBooking, IntegrationError> {
+        return Err(IntegrationError("no riders available".to_string()));
+    }
+
+    fn parse_webhook(&self, _signature: Option<&str>, _body: &[u8]) -> Result<ShipmentEvent, IntegrationError> {
+        return Err(IntegrationError("not used".to_string()));
+    }
 }
 
 /// A request to the shop API with an optional shopper token and guest cart token.
@@ -111,8 +131,12 @@ struct Shop {
 
 /// A store selling Rice (1,000) and Beans (500) online, 20 of each, with one delivery zone: 1,500 flat + 100 per kg.
 async fn open_shop(pool: &PgPool, email: &str) -> Shop {
+    return open_shop_with(pool, email, Integrations::mock(WEBHOOK_SECRET)).await;
+}
+
+async fn open_shop_with(pool: &PgPool, email: &str, integrations: Integrations) -> Shop {
     let mailbox = Mailbox::default();
-    let router = router_with(pool.clone(), mailbox.clone());
+    let router = router_with(pool.clone(), mailbox.clone(), integrations);
     let (owner, tenant_id) = signup_owner(&router, pool, email).await;
     let store = create_store(&router, &owner, "web-shop").await;
     let unit = seed_unit(pool, tenant_id, "Each", "ea").await;
@@ -636,4 +660,25 @@ async fn staff_move_a_paid_order_through_and_a_cancelled_paid_order_is_refunded_
 
     let (_, list) = get(&s.router, &format!("/api/v1/shop-orders?store_id={}&status=cancelled", s.store), &as_user(&s.owner)).await;
     assert_eq!(list["data"].as_array().unwrap().len(), 1);
+}
+
+#[sqlx::test]
+async fn a_courier_refusal_fails_the_shipment_but_leaves_an_issue_for_an_admin(pool: PgPool) {
+    let mut integrations = Integrations::mock(WEBHOOK_SECRET);
+    integrations.courier = Arc::new(RefusingCourier);
+    let s = open_shop_with(&pool, "courier-down@example.com", integrations).await;
+    let shopper = s.shopper("courier-down-shopper@example.com").await;
+    s.add(Some(&shopper), None, s.beans, "1").await;
+    let total = s.quote(Some(&shopper), None, json!({})).await["total_minor"].as_i64().unwrap();
+    let (status, body) = s.checkout(Some(&shopper), None, "pay_on_delivery", total, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let order_id = body["data"]["order"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = s.staff(&order_id, "ship", json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "COURIER_FAILED");
+    let (_, issues) = get(&s.router, "/api/v1/operations/issues", &as_user(&s.owner)).await;
+    let issue = issues["data"].as_array().unwrap().iter().find(|i| i["kind"] == "courier_failed").expect("a courier_failed issue");
+    assert_eq!(issue["reference_id"], order_id.as_str());
+    assert!(issue["detail"].as_str().unwrap().contains("no riders available"));
 }

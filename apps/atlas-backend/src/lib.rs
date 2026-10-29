@@ -27,6 +27,7 @@ mod normalize;
 mod notifications;
 mod operations;
 mod payments;
+mod pdf;
 mod pricing;
 mod products;
 mod purchasing;
@@ -109,6 +110,8 @@ pub fn api_router(state: AppState) -> Router {
         .nest(&format!("{}/expense-categories", API_PREFIX), expenses::categories_router())
         .nest(&format!("{}/expenses", API_PREFIX), expenses::router())
         .nest(&format!("{}/notifications", API_PREFIX), notifications::router())
+        .nest(&format!("{}/approval-policies", API_PREFIX), approvals::policies_router())
+        .nest(&format!("{}/approval-requests", API_PREFIX), approvals::requests_router())
         .nest(&format!("{}/audit-events", API_PREFIX), audit_log::router())
         .nest(&format!("{}/operations", API_PREFIX), operations::router())
         .nest(&format!("{}/imports", API_PREFIX), imports::imports_router())

@@ -114,6 +114,7 @@ pub async fn update_category(
         Some(name) => Some(required_text("name", name, 100)?),
         None => None,
     };
+    let before = audit::snapshot(&mut tx, "product_categories", "id", category_id).await?;
     let category = sqlx::query_as::<_, Category>(&format!(
         "UPDATE atlas.product_categories
          SET name = COALESCE($3, name), description = COALESCE($4, description), updated_at = now()
@@ -127,7 +128,11 @@ pub async fn update_category(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("Category not found."))?;
-    audit::record(&mut tx, tenant_id, user_id, "product_category", category.id, "product_category.update", serde_json::to_value(&category).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "product_category", entity_id: category.id, action: "product_category.update", table: "product_categories", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Category updated.", category)));
 }

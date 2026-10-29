@@ -74,11 +74,18 @@ async fn insert(conn: &mut PgConnection, tenant_id: Uuid, user_id: Uuid, change:
     return Ok(());
 }
 
-/// The previous price is the best still-running rule for the same product, store, group and quantity tier.
-pub async fn record_rule_created(conn: &mut PgConnection, tenant_id: Uuid, user_id: Uuid, rule: &PriceRule) -> Result<(), ApiError> {
-    let previous: Option<i64> = sqlx::query_scalar(
+/// The best still-running rule for the same product, store, group and quantity tier, other than `except`.
+pub async fn running_price(
+    conn: &mut PgConnection,
+    product_id: Uuid,
+    store_id: Option<Uuid>,
+    customer_group_id: Option<Uuid>,
+    min_quantity: Decimal,
+    except: Option<Uuid>,
+) -> Result<Option<i64>, ApiError> {
+    return sqlx::query_scalar(
         "SELECT unit_price_amount_minor FROM atlas.price_rules
-         WHERE product_id = $1 AND id <> $2
+         WHERE product_id = $1 AND ($2::uuid IS NULL OR id <> $2)
            AND store_id IS NOT DISTINCT FROM $3
            AND customer_group_id IS NOT DISTINCT FROM $4
            AND min_quantity = $5
@@ -86,13 +93,19 @@ pub async fn record_rule_created(conn: &mut PgConnection, tenant_id: Uuid, user_
          ORDER BY priority DESC, created_at DESC
          LIMIT 1",
     )
-    .bind(rule.product_id)
-    .bind(rule.id)
-    .bind(rule.store_id)
-    .bind(rule.customer_group_id)
-    .bind(rule.min_quantity)
-    .fetch_optional(&mut *conn)
-    .await?;
+    .bind(product_id)
+    .bind(except)
+    .bind(store_id)
+    .bind(customer_group_id)
+    .bind(min_quantity)
+    .fetch_optional(conn)
+    .await
+    .map_err(ApiError::from);
+}
+
+/// The previous price is the rule this one replaces, per `running_price`.
+pub async fn record_rule_created(conn: &mut PgConnection, tenant_id: Uuid, user_id: Uuid, rule: &PriceRule) -> Result<(), ApiError> {
+    let previous = running_price(conn, rule.product_id, rule.store_id, rule.customer_group_id, rule.min_quantity, Some(rule.id)).await?;
     return insert(
         conn,
         tenant_id,

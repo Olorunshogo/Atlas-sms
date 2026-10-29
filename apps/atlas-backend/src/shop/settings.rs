@@ -118,6 +118,7 @@ pub async fn upsert_storefront(
         return Err(ApiError::bad_request_with_code("limits and loyalty rates must be positive", "VALIDATION_FAILED"));
     }
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    let before = audit::snapshot(&mut tx, "storefronts", "store_id", store_id).await?;
     let storefront = sqlx::query_as::<_, Storefront>(&format!(
         "INSERT INTO atlas.storefronts
             (store_id, tenant_id, handle, is_enabled, reservation_minutes, ussd_window_minutes, bank_transfer_window_minutes,
@@ -159,7 +160,11 @@ pub async fn upsert_storefront(
         sqlx::Error::Database(db) if db.is_unique_violation() => ApiError::conflict_with_code("That handle is taken.", "ALREADY_EXISTS"),
         other => ApiError::from(other),
     })?;
-    audit::record(&mut tx, tenant_id, user_id, "storefront", store_id, "storefront.update", serde_json::to_value(&storefront).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "storefront", entity_id: store_id, action: "storefront.update", table: "storefronts", key: "store_id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Storefront saved.", storefront)));
 }
@@ -219,6 +224,7 @@ pub async fn update_zone(
         return Err(ApiError::bad_request_with_code("fees must not be negative", "VALIDATION_FAILED"));
     }
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    let before = audit::snapshot(&mut tx, "shipping_zones", "id", zone_id).await?;
     let zone = sqlx::query_as::<_, ShippingZone>(&format!(
         "UPDATE atlas.shipping_zones SET
              name = COALESCE($3, name), regions = COALESCE($4, regions), base_fee_minor = COALESCE($5, base_fee_minor),
@@ -238,7 +244,11 @@ pub async fn update_zone(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("Shipping zone not found."))?;
-    audit::record(&mut tx, tenant_id, user_id, "shipping_zone", zone.id, "shipping_zone.update", serde_json::to_value(&zone).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "shipping_zone", entity_id: zone.id, action: "shipping_zone.update", table: "shipping_zones", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Shipping zone updated.", zone)));
 }

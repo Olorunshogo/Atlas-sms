@@ -31,5 +31,9 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    optimizeDeps: {
+      // axios is @atlas/api's dependency, not this app's, so it resolves through that package
+      include: ['@atlas/api > axios'],
+    },
   },
 });

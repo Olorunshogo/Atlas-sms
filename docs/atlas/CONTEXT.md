@@ -90,51 +90,57 @@ CI gets wired when that work happens, not before.
   offline snapshot under `/api/v1/stores/{id}/catalog`, server-priced
   checkout (`POST /api/v1/sales`, `POST /api/v1/sync/sales`), payments,
   receipts with per-store gap-free numbering, returns and customers. No
-  screen calls them yet. Pinia is
-  already a dependency and unused; the cart (`addItem`, `removeItem`,
+  screen calls them yet. The cart (`addItem`, `removeItem`,
   `updateQuantity`, `applyDiscount`, `clearCart`, a running total several
   components read, payment status pending/success/failed, and persistence
   across a reload or backgrounded app via `pinia-plugin-persistedstate`) is
-  the natural place to use it. Session/auth state stays a plain composable;
+  the natural place to use it. Pinia is only a dependency of `atlas-web`
+  today; `atlas-pos` needs it added. The till must not offer store credit
+  while offline: `POST /api/v1/sync/sales` refuses it, since an offline
+  till can't check the balance. Session/auth state stays a plain composable;
   it is not what Pinia is for here.
 - Capacitor secure storage for the POS refresh token. It is memory-only today.
-- A screen for custom roles. Invite of a seeded role is built.
-- `module_toggles` has no HTTP API yet. Price rules can be created and
-  deleted but not edited in place; a change is a new rule, recorded in
-  `GET /api/v1/products/{id}/price-history`.
-- No payment gateway: a `pending` card or transfer payment is confirmed
-  by a person (`POST /api/v1/payments/{id}/status`), not a webhook.
-  Store credit can be refunded to but not yet spent at checkout.
-- SRS v1.0 sections 3-7 have backend coverage for FR-07 to FR-14 and
-  FR-21 to FR-24 and FR-26: categories and variants, price history,
-  physical counts, batches with first-expiry-first-out and expiry views,
-  unsellable stock, the purchase order lifecycle, purchase returns,
-  staged transfers, expenses, and in-app notifications. See
-  `api-reference.md` sections 6, 8, 9, 9b and 16b. Not built: email/SMS
-  notification delivery (FR-26 calls it optional), price-change approval
-  thresholds (FR-09 "any configured"), and FR-25/27-30 have not been
-  re-audited against the SRS.
-- A batch-tracked transfer must name its batch; transfers don't allocate
-  first-expiry-first-out the way sales do.
+- Custom roles: no create, edit or delete endpoint and no screen. Only
+  `GET /api/v1/roles` and inviting with a seeded role are built.
+- `store_module_toggles` (recipes, table orders, layaway, repairs,
+  delivery, loyalty) has no HTTP API, and nothing reads it yet. Price
+  rules can be created and deleted but not edited in place; a change is a
+  new rule, recorded in `GET /api/v1/products/{id}/price-history`.
+- No payment gateway at the till: a `pending` card or transfer payment is
+  confirmed by a person (`POST /api/v1/payments/{id}/status`), not a
+  webhook.
+- SRS v1.0 FR-07 to FR-30 have backend coverage, FR-25 and FR-27 to FR-30
+  re-checked against the SRS text. Approvals (FR-09, FR-29) are approval
+  policies plus held requests (`api-reference.md` section 16f); the
+  cashier discount cap stays the store setting
+  `max_cashier_discount_basis_points`, because a till discount is
+  authorised on the spot by a `sale.discount` holder, not queued. Not
+  built: email/SMS notification delivery beyond the email outbox (FR-26
+  calls it optional).
+- The `atlas-web` dashboard has one page. None of the backend modules
+  (products, stock, transfers, purchasing, expenses, reports, approvals,
+  audit, imports, notifications, settings) has a screen yet.
 - No CI workflow. See item 8.
 
-## The online storefront (approved, not yet built)
+## The online storefront (approved and built)
 
 FR-10 to FR-14 from `docs/SystemsRequirementDoc.md` (cart, wishlist,
 checkout, payment gateway, promotions, invoices) was initially out of
 scope per the dated SRS v1.0 (`docs/PDF/Store-Management-System-SRS-v1.0.pdf`,
 which explicitly lists "online shopping storefront" as excluded from the
-initial release). The owner has since separately approved it. Decided:
-a new app, `apps/atlas-storefront`, not a route tree inside `atlas-web`
+initial release). The owner has since separately approved it, and it is
+built: the backend `shop` module (catalogue, carts, wishlists, checkout,
+promotions, loyalty, shipping, staff order handling, payment and courier
+webhooks) and the `apps/atlas-storefront` Nuxt app (catalogue, product,
+cart, checkout, wishlist, orders, account). It is a separate app, not a
+route tree inside `atlas-web`, because customer auth is a different surface
+from staff auth.
 
-- customer auth is a different surface from staff auth. Payment gateway
-  starts as the same adapter-trait-plus-mock pattern `EmailProvider` and
-  the newly-built `PaymentProvider` already use (a real Paystack/Flutterwave
-  adapter is separate, later work). Rebuilt clean against current `develop`,
-  not copied from the stale `origin/at` branch it originated on - migrations
-  renumbered past whatever the tree is at when that work starts, `lib.rs`/
-  `state.rs` updated to add rather than replace, and real tests written
-  (the original had none).
+Every outside provider (payment gateway, courier, social sign-in) sits
+behind a trait in `integrations.rs` with a mock, the same pattern as
+`EmailProvider`; a real Paystack/Flutterwave or courier adapter is
+separate, later work. Rebuilt clean against `develop`, not copied from the
+stale `origin/at` branch it originated on.
 
 ## The Debridgers reference-source port
 

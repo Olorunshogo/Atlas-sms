@@ -117,8 +117,13 @@ pub async fn update_method(
     let tenant_id = tx.tenant_id;
     let user_id = tx.user_id;
     roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "store.update").await?;
+    let before = audit::snapshot(&mut tx, "payment_methods", "id", method_id).await?;
     let method = service::update_method(&mut tx, method_id, &body).await?;
-    audit::record(&mut tx, tenant_id, user_id, "payment_method", method.id, "payment_method.update", serde_json::to_value(&method).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "payment_method", entity_id: method.id, action: "payment_method.update", table: "payment_methods", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Payment method updated.", method)));
 }

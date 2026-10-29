@@ -341,3 +341,54 @@ async fn receiving_goods_creates_or_tops_up_batches(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{}", body);
     assert_eq!(batch_on_hand(&p).await, vec![("LOT-7".to_string(), qty("15"))]);
 }
+
+async fn transfer(p: &Pharmacy, to: Uuid, quantity: &str) -> String {
+    let (status, body) = post(
+        &p.router,
+        "/api/v1/stock/transfers",
+        &as_user(&p.owner),
+        json!({ "from_store_id": p.store, "to_store_id": to, "product_id": p.drug, "stock_item_id": null, "quantity": quantity, "reason": "Restock branch" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let id = id_of(&body);
+    let (status, body) = post(&p.router, &format!("/api/v1/stock/transfers/{}/approve", id), &as_user(&p.owner), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    return id;
+}
+
+#[sqlx::test]
+async fn a_transfer_naming_no_batch_sends_the_earliest_expiring_and_they_arrive_as_sent(pool: PgPool) {
+    let p = pharmacy(&pool, "fefo-transfer-owner@example.com").await;
+    let branch = create_store(&p.router, &p.owner, "pharmacy-branch").await;
+    list_at(&p.router, &p.owner, p.drug, branch).await;
+    batch(&p, "B-OLD", -5, "10").await;
+    batch(&p, "B-SOON", 20, "4").await;
+    batch(&p, "B-LATE", 300, "10").await;
+
+    let id = transfer(&p, branch, "6").await;
+    let (status, body) = post(&p.router, &format!("/api/v1/stock/transfers/{}/dispatch", id), &as_user(&p.owner), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(
+        batch_on_hand(&p).await,
+        vec![("B-OLD".to_string(), qty("10")), ("B-LATE".to_string(), qty("8"))],
+        "expired stock stays behind"
+    );
+    let (status, body) = post(&p.router, &format!("/api/v1/stock/transfers/{}/receive", id), &as_user(&p.owner), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let (_, body) = get(&p.router, &format!("/api/v1/stock/batches?store_id={}", branch), &as_user(&p.owner)).await;
+    let arrived: Vec<(String, Decimal)> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["batch_number"].as_str().unwrap().to_string(), qty(b["on_hand"].as_str().unwrap())))
+        .collect();
+    assert_eq!(arrived, vec![("B-SOON".to_string(), qty("4")), ("B-LATE".to_string(), qty("2"))]);
+
+    // On hand counts the expired batch, so the request passes; dispatch only sends what's unexpired
+    let id = transfer(&p, branch, "12").await;
+    let (status, body) = post(&p.router, &format!("/api/v1/stock/transfers/{}/dispatch", id), &as_user(&p.owner), json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{}", body);
+    assert_eq!(body["code"], "PRODUCT_OUT_OF_STOCK");
+    assert_eq!(batch_on_hand(&p).await, vec![("B-OLD".to_string(), qty("10")), ("B-LATE".to_string(), qty("8"))]);
+}

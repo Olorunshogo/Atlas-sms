@@ -34,6 +34,60 @@ pub async fn record(
     .await;
 }
 
+/// The row as stored, for an edit's before-and-after values (FR-27). `table` and `key` are always literals, and only tables without secrets are snapshot.
+pub async fn snapshot(conn: &mut PgConnection, table: &str, key: &str, id: Uuid) -> Result<Option<Value>, ApiError> {
+    return sqlx::query_scalar(&format!("SELECT to_jsonb(t) FROM atlas.{} t WHERE t.{} = $1", table, key))
+        .bind(id)
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::from);
+}
+
+pub struct Edit<'a> {
+    pub tenant_id: Uuid,
+    pub actor_user_id: Uuid,
+    pub entity_type: &'a str,
+    pub entity_id: Uuid,
+    pub action: &'a str,
+    pub table: &'a str,
+    pub key: &'a str,
+    /// From `snapshot`, taken before the change.
+    pub before: Option<Value>,
+}
+
+/// Records an edit with the row as it was and as it now is, so the two read side by side.
+pub async fn record_edit(conn: &mut PgConnection, edit: Edit<'_>) -> Result<(), ApiError> {
+    let after = snapshot(conn, edit.table, edit.key, edit.entity_id).await?;
+    return record_change(
+        conn,
+        Change {
+            tenant_id: edit.tenant_id,
+            actor_user_id: edit.actor_user_id,
+            device_id: None,
+            entity_type: edit.entity_type,
+            entity_id: edit.entity_id,
+            action: edit.action,
+            before: edit.before,
+            after,
+        },
+    )
+    .await;
+}
+
+/// The approval that let a held change through, written onto the change's own audit row (FR-27).
+#[derive(Debug, Clone, Copy)]
+pub struct Approval {
+    pub request_id: Uuid,
+    pub approved_by_user_id: Uuid,
+}
+
+pub fn with_approval(after: Option<Value>, approval: Option<Approval>) -> Option<Value> {
+    let (Some(Value::Object(mut fields)), Some(approval)) = (after.clone(), approval) else { return after };
+    fields.insert("approval_request_id".to_string(), Value::from(approval.request_id.to_string()));
+    fields.insert("approved_by_user_id".to_string(), Value::from(approval.approved_by_user_id.to_string()));
+    return Some(Value::Object(fields));
+}
+
 pub struct Change<'a> {
     pub tenant_id: Uuid,
     pub actor_user_id: Uuid,

@@ -8,6 +8,7 @@
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::customers::credit;
 use crate::error::{codes, ApiError};
 use crate::inventory::NegativeStockPolicy;
 use crate::payments::models::Payment;
@@ -57,7 +58,7 @@ pub async fn add_payment(
     }
     let method = payments::active_method(conn, input.payment_method_id).await?;
     if method.kind == "store_credit" {
-        return Err(ApiError::bad_request_with_code("Store credit can't be used as a tender yet.", codes::PAYMENT_METHOD_INVALID));
+        checkout::check_store_credit(sale.customer_id, input.status, checkout::CheckoutMode::Live)?;
     }
     if input.amount_minor <= 0 {
         return Err(ApiError::bad_request("payment amounts must be positive"));
@@ -118,6 +119,9 @@ pub async fn add_payment(
         },
     )
     .await?;
+    if let (true, Some(customer_id)) = (method.kind == "store_credit", sale.customer_id) {
+        credit::spend(conn, tenant_id, customer_id, input.amount_minor, sale_id, payment.id, actor_user_id).await?;
+    }
     recompute(conn, tenant_id, sale_id, actor_user_id).await?;
     return Ok(payment);
 }
@@ -170,8 +174,23 @@ pub async fn reverse(
         ));
     }
     transition(conn, payment_id, &["succeeded"], "reversed", None, Some(reason)).await?;
+    give_back_credit(conn, tenant_id, &[payment_id], actor_user_id).await?;
     recompute(conn, tenant_id, sale_id, actor_user_id).await?;
     return payments::get_payment(conn, payment_id).await;
+}
+
+/// A reversed or voided store credit payment goes back to the customer's balance; other payments are left alone.
+pub async fn give_back_credit(conn: &mut PgConnection, tenant_id: Uuid, payment_ids: &[Uuid], actor_user_id: Uuid) -> Result<(), ApiError> {
+    let credit_payments: Vec<(Uuid, i64)> = sqlx::query_as(
+        "SELECT id, amount_minor FROM atlas.payments WHERE id = ANY($1) AND method = 'store_credit'",
+    )
+    .bind(payment_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (payment_id, amount_minor) in credit_payments {
+        credit::give_back(conn, tenant_id, payment_id, amount_minor, None, actor_user_id).await?;
+    }
+    return Ok(());
 }
 
 /**

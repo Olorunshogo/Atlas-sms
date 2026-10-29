@@ -1,3 +1,4 @@
+pub mod credit;
 mod groups;
 mod handlers;
 mod models;

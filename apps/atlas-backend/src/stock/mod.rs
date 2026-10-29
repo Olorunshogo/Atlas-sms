@@ -9,6 +9,10 @@ use axum::Router;
 
 use crate::state::AppState;
 
+pub use batches::{apply_write_off, WriteOffRequest};
+pub use handlers::apply_adjustment;
+pub use models::AdjustStockRequest;
+
 pub fn router() -> Router<AppState> {
     return Router::new()
         .route("/on-hand", get(handlers::get_stock_on_hand))

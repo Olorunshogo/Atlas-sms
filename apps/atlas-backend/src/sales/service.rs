@@ -201,16 +201,21 @@ pub async fn void_sale(
         .await?;
     }
 
-    sqlx::query(
+    let reversed: Vec<Uuid> = sqlx::query_scalar::<_, Option<Uuid>>(
         "UPDATE atlas.payments
          SET status = CASE WHEN status = 'pending' THEN 'failed'::atlas.payment_status ELSE 'reversed'::atlas.payment_status END,
              status_reason = $2, updated_at = now()
-         WHERE sale_id = $1 AND status IN ('pending', 'succeeded')",
+         WHERE sale_id = $1 AND status IN ('pending', 'succeeded')
+         RETURNING CASE WHEN status = 'reversed' THEN id END",
     )
     .bind(sale_id)
     .bind(format!("Sale voided: {}", reason.trim()))
-    .execute(&mut *conn)
-    .await?;
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .flatten()
+    .collect();
+    super::settlement::give_back_credit(conn, tenant_id, &reversed, actor_user_id).await?;
 
     sqlx::query(
         "UPDATE atlas.sales

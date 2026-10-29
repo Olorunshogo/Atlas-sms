@@ -57,7 +57,8 @@ export default defineNuxtConfig({
   vite: {
     plugins: [tailwindcss()],
     optimizeDeps: {
-      include: ['vee-validate', 'zod'],
+      // axios is @atlas/api's dependency, not this app's, so it resolves through that package
+      include: ['@atlas/api > axios', 'vee-validate', 'zod'],
     },
   },
 });

@@ -252,12 +252,7 @@ pub async fn dispatch_transfer(
         codes::TRANSFER_NOT_APPROVED,
     ))?;
 
-    let lines = [PostingLine {
-        product_id: claimed.product_id,
-        stock_item_id: claimed.stock_item_id,
-        unit_id: None,
-        quantity: claimed.quantity,
-    }];
+    let lines = dispatch_lines(conn, &claimed).await?;
     inventory::service::post(
         conn,
         Posting {
@@ -277,7 +272,34 @@ pub async fn dispatch_transfer(
     return Ok(claimed);
 }
 
-/// Mirrors `dispatch_transfer`: claim the transition first, then post the movement.
+/**
+ * A named batch moves as named. A batch-tracked product with none named is split across the source's batches
+ * first-expiry-first-out, expired batches left behind - the same rule a sale follows (FR-14).
+ */
+async fn dispatch_lines(conn: &mut PgConnection, transfer: &StockTransfer) -> Result<Vec<PostingLine>, ApiError> {
+    let whole = PostingLine { product_id: transfer.product_id, stock_item_id: transfer.stock_item_id, unit_id: None, quantity: transfer.quantity };
+    if transfer.stock_item_id.is_some() || !inventory::batches::tracks_batches(conn, transfer.product_id).await? {
+        return Ok(vec![whole]);
+    }
+    inventory::service::lock_products(conn, transfer.from_store_id, &[transfer.product_id]).await?;
+    let (allocations, remainder) = inventory::batches::allocate_fefo(conn, transfer.from_store_id, transfer.product_id, transfer.quantity, false).await?;
+    if remainder > Decimal::ZERO {
+        return Err(ApiError::conflict_with_code(
+            format!(
+                "Not enough unexpired stock to send: requested {}, available {}.",
+                transfer.quantity.normalize(),
+                (transfer.quantity - remainder).normalize()
+            ),
+            codes::PRODUCT_OUT_OF_STOCK,
+        ));
+    }
+    return Ok(allocations
+        .into_iter()
+        .map(|(stock_item_id, quantity)| PostingLine { product_id: transfer.product_id, stock_item_id, unit_id: None, quantity })
+        .collect());
+}
+
+/// Mirrors `dispatch_transfer`: claim the transition first, then post what it sent.
 pub async fn receive_transfer(
     conn: &mut PgConnection,
     tenant_id: Uuid,
@@ -299,12 +321,19 @@ pub async fn receive_transfer(
         codes::TRANSFER_NOT_DISPATCHED,
     ))?;
 
-    let lines = [PostingLine {
-        product_id: claimed.product_id,
-        stock_item_id: claimed.stock_item_id,
-        unit_id: None,
-        quantity: claimed.quantity,
-    }];
+    // The same batches arrive that left, whatever dispatch picked
+    let sent: Vec<(Option<Uuid>, Decimal)> = sqlx::query_as(
+        "SELECT stock_item_id, -quantity FROM atlas.stock_movements
+         WHERE reference_id = $1 AND movement_type = 'transfer_out' AND store_id = $2 ORDER BY id",
+    )
+    .bind(claimed.id)
+    .bind(claimed.from_store_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let lines: Vec<PostingLine> = sent
+        .into_iter()
+        .map(|(stock_item_id, quantity)| PostingLine { product_id: claimed.product_id, stock_item_id, unit_id: None, quantity })
+        .collect();
     inventory::service::post(
         conn,
         Posting {

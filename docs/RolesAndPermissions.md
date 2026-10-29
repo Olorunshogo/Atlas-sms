@@ -64,8 +64,13 @@ Added with purchasing, expenses and stock control:
 purchase.approve     approve a submitted purchase order, and receive more
                      than was ordered when an over-receipt reason is given
 expense.manage       record, approve and pay store expenses
-stock.approve        adjust or write off more than the store's threshold
+stock.approve        adjust or write off past the approval policy, and
+                     approve held adjustments and write-offs
 audit.view           search the audit trail and see operational issues
+
+Added with approval policies:
+price.approve        change a price past the approval policy, and approve
+                     held price changes (owner and admin)
 
 Added with the online storefront:
 storefront.manage    set up a store's online shop and shipping zones

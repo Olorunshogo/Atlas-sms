@@ -19,6 +19,7 @@ use crate::error::{codes, ApiError};
 use crate::extractors::AdminTx;
 use crate::integrations::{PaymentRequest, PaymentState};
 use crate::inventory;
+use crate::notifications::service as notifications;
 use crate::response::ApiEnvelope;
 use crate::state::AppState;
 use crate::validate::required_text;
@@ -145,8 +146,15 @@ async fn start_payment(
                 idempotency_key: idempotency_key.to_string(),
                 email: email.to_string(),
             })
-            .await
-            .map_err(|err| ApiError::conflict_with_code(format!("The payment couldn't be started: {}", err), "PAYMENT_START_FAILED"))?;
+            .await;
+        let init = match init {
+            Ok(init) => init,
+            Err(err) => {
+                let detail = format!("{} payment for order {} couldn't be started: {}", method, order_id, err);
+                notifications::record_issue_detached(&state.pool, tenant_id, "payment_start_failed", &detail, Some(order_id)).await;
+                return Err(ApiError::conflict_with_code(format!("The payment couldn't be started: {}", err), "PAYMENT_START_FAILED"));
+            }
+        };
         (Some(init.gateway_ref), init.redirect_url, init.instructions)
     };
     let id = Uuid::now_v7();
@@ -491,8 +499,21 @@ pub async fn payment_webhook(State(state): State<AppState>, headers: HeaderMap, 
     if status == "pending" || status == "expired" {
         match event.state {
             PaymentState::Succeeded if order.status == "cancelled" => {
-                let _ = state.integrations.payments.refund(&event.gateway_ref, order.total_minor).await;
-                sqlx::query("UPDATE atlas.online_payments SET status = 'refunded', confirmed_at = now() WHERE id = $1").bind(payment_id).execute(&mut *tx).await?;
+                // A refund that didn't go through stays a succeeded payment with an issue for a person to settle
+                let status = match state.integrations.payments.refund(&event.gateway_ref, order.total_minor).await {
+                    Ok(_) => "refunded",
+                    Err(err) => {
+                        let detail = format!("Order {} was cancelled before its payment landed, and the refund failed: {}", order.order_number, err);
+                        let tenant_id: Uuid = sqlx::query_scalar("SELECT tenant_id FROM atlas.stores WHERE id = $1").bind(order.store_id).fetch_one(&mut *tx).await?;
+                        notifications::record_issue(&mut tx, tenant_id, "refund_failed", &detail, Some(order_id)).await;
+                        "succeeded"
+                    }
+                };
+                sqlx::query("UPDATE atlas.online_payments SET status = $2::atlas.online_payment_status, confirmed_at = now() WHERE id = $1")
+                    .bind(payment_id)
+                    .bind(status)
+                    .execute(&mut *tx)
+                    .await?;
             }
             PaymentState::Succeeded => {
                 sqlx::query("UPDATE atlas.online_payments SET status = 'succeeded', confirmed_at = now() WHERE id = $1").bind(payment_id).execute(&mut *tx).await?;

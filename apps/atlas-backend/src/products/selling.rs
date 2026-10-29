@@ -4,12 +4,15 @@
  * gated on `product.manage`, the one catalogue permission.
  */
 use axum::extract::Path;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::approvals;
 use crate::audit;
 use crate::error::{codes, ApiError};
 use crate::extractors::TenantTx;
@@ -89,6 +92,7 @@ pub async fn update_product(
         let tenant_id = tx.tenant_id;
         super::categories::assert_assignable(&mut tx, tenant_id, category_id).await?;
     }
+    let before = audit::snapshot(&mut tx, "products", "id", product_id).await?;
     let product = sqlx::query_as::<_, Product>(&format!(
         "UPDATE atlas.products
          SET name = COALESCE($2, name),
@@ -118,7 +122,11 @@ pub async fn update_product(
     .await?
     .ok_or_else(|| ApiError::not_found("Product not found."))?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
-    audit::record(&mut tx, tenant_id, user_id, "product", product.id, "product.update", serde_json::to_value(&product).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "product", entity_id: product.id, action: "product.update", table: "products", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Product updated.", product)));
 }
@@ -249,7 +257,7 @@ pub async fn create_sale_unit(
 
 // === Price rules
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreatePriceRuleRequest {
     pub store_id: Option<Uuid>,
     pub customer_group_id: Option<Uuid>,
@@ -275,12 +283,16 @@ pub struct PriceRule {
     pub ends_at: Option<DateTime<Utc>>,
 }
 
-/// `POST /api/v1/products/:id/price-rules`. Branch prices, wholesale tiers and promotions are all rows here.
+/**
+ * `POST /api/v1/products/:id/price-rules`. Branch prices, wholesale tiers and promotions are all rows here.
+ * A change from the running price past the `price_change` policy, by someone without `price.approve`, is held: `202`
+ * with the approval request (FR-09). A first price has nothing to compare against and never needs approval.
+ */
 pub async fn create_price_rule(
     Path(product_id): Path<Uuid>,
     mut tx: TenantTx,
     Json(body): Json<CreatePriceRuleRequest>,
-) -> Result<Json<ApiEnvelope<PriceRule>>, ApiError> {
+) -> Result<Response, ApiError> {
     assert_manage(&mut tx).await?;
     if body.unit_price_amount_minor < 0 {
         return Err(ApiError::bad_request("unit_price_amount_minor must not be negative"));
@@ -300,7 +312,45 @@ pub async fn create_price_rule(
     if let Some(group_id) = body.customer_group_id {
         require_visible(&mut tx, "customer_groups", group_id, "Customer group").await?;
     }
-    let tenant_id = tx.tenant_id;
+    let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    let min_quantity = body.min_quantity.unwrap_or(Decimal::ONE);
+    let previous = super::price_history::running_price(&mut tx, product_id, body.store_id, body.customer_group_id, min_quantity, None).await?;
+    if let Some(previous) = previous.filter(|p| *p > 0) {
+        let points = (body.unit_price_amount_minor - previous) * 10_000 / previous;
+        let measure = approvals::Measure::BasisPoints(points);
+        if approvals::needs_approval(&mut tx, tenant_id, body.store_id, user_id, approvals::Operation::PriceChange, measure).await? {
+            let held = approvals::hold(
+                &mut tx,
+                approvals::Hold {
+                    tenant_id,
+                    store_id: body.store_id,
+                    operation: approvals::Operation::PriceChange,
+                    subject_id: product_id,
+                    payload: serde_json::to_value(&body).map_err(|e| ApiError::Internal(e.to_string()))?,
+                    summary: format!("Price {} to {} ({:+}.{:02}%)", previous, body.unit_price_amount_minor, points / 100, (points % 100).abs()),
+                    requested_by_user_id: user_id,
+                    message: "Price change held for approval.",
+                },
+            )
+            .await?;
+            tx.commit().await?;
+            return Ok(held);
+        }
+    }
+    let rule = apply_price_rule(&mut tx, tenant_id, user_id, product_id, &body, None).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Price rule created.", rule)).into_response());
+}
+
+/// Inserts the rule with its price history and audit row. Also how an approved price change applies.
+pub async fn apply_price_rule(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    product_id: Uuid,
+    body: &CreatePriceRuleRequest,
+    approval: Option<audit::Approval>,
+) -> Result<PriceRule, ApiError> {
     let rule = sqlx::query_as::<_, PriceRule>(
         "INSERT INTO atlas.price_rules
             (id, tenant_id, product_id, store_id, customer_group_id, min_quantity, unit_price_amount_minor, priority, starts_at, ends_at)
@@ -317,13 +367,12 @@ pub async fn create_price_rule(
     .bind(body.priority)
     .bind(body.starts_at)
     .bind(body.ends_at)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-    let user_id = tx.user_id;
-    super::price_history::record_rule_created(&mut tx, tenant_id, user_id, &rule).await?;
-    audit::record(&mut tx, tenant_id, user_id, "price_rule", rule.id, "price_rule.create", serde_json::to_value(&rule).ok()).await?;
-    tx.commit().await?;
-    return Ok(Json(ApiEnvelope::ok("Price rule created.", rule)));
+    super::price_history::record_rule_created(conn, tenant_id, user_id, &rule).await?;
+    let after = audit::with_approval(serde_json::to_value(&rule).ok(), approval);
+    audit::record(conn, tenant_id, user_id, "price_rule", rule.id, "price_rule.create", after).await?;
+    return Ok(rule);
 }
 
 // === Barcodes

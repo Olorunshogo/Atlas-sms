@@ -18,8 +18,7 @@ use crate::roles;
 const SETTINGS_COLUMNS: &str = "id, currency, timezone, prices_include_tax, default_tax_rate_id,
      cash_rounding_increment_minor, max_cashier_discount_basis_points, allow_negative_stock, allow_pay_later,
      address, phone, receipt_prefix, receipt_header, receipt_footer, return_window_days,
-     refund_approval_threshold_minor, restockable_conditions::text[] AS restockable_conditions,
-     allow_expired_sale, expiry_warning_days, adjustment_approval_quantity, write_off_approval_quantity, allow_self_approval";
+     restockable_conditions::text[] AS restockable_conditions, allow_expired_sale, expiry_warning_days, allow_self_approval";
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct StoreSettings {
@@ -40,18 +39,12 @@ pub struct StoreSettings {
     pub receipt_footer: Option<String>,
     /// Whole local days after the sale in which a return needs no approval.
     pub return_window_days: i32,
-    /// A refund at or above this needs approval; `None` means no amount limit.
-    pub refund_approval_threshold_minor: Option<i64>,
     /// Item conditions that go back into saleable stock on return.
     pub restockable_conditions: Vec<String>,
     /// Lets an expired batch be sold; off, first-expiry-first-out skips it and naming it is refused (FR-14).
     pub allow_expired_sale: bool,
     /// How many days ahead of expiry a batch shows as near expiry.
     pub expiry_warning_days: i32,
-    /// Adjustments bigger than this (either way) need `stock.approve`; `None` means no limit (FR-29).
-    pub adjustment_approval_quantity: Option<rust_decimal::Decimal>,
-    /// Write-offs bigger than this need `stock.approve`; `None` means no limit.
-    pub write_off_approval_quantity: Option<rust_decimal::Decimal>,
     /// Off: whoever raised a count, order, expense, transfer or purchase return can't approve it.
     pub allow_self_approval: bool,
 }
@@ -80,15 +73,9 @@ pub struct UpdateStoreSettingsRequest {
     pub receipt_header: Option<String>,
     pub receipt_footer: Option<String>,
     pub return_window_days: Option<i32>,
-    #[serde(default, deserialize_with = "explicit_null")]
-    pub refund_approval_threshold_minor: Option<Option<i64>>,
     pub restockable_conditions: Option<Vec<String>>,
     pub allow_expired_sale: Option<bool>,
     pub expiry_warning_days: Option<i32>,
-    #[serde(default, deserialize_with = "explicit_null")]
-    pub adjustment_approval_quantity: Option<Option<rust_decimal::Decimal>>,
-    #[serde(default, deserialize_with = "explicit_null")]
-    pub write_off_approval_quantity: Option<Option<rust_decimal::Decimal>>,
     pub allow_self_approval: Option<bool>,
 }
 
@@ -117,18 +104,11 @@ pub async fn update_settings(
     if body.max_cashier_discount_basis_points.is_some_and(|v| !(0..=10_000).contains(&v)) {
         return Err(ApiError::bad_request("max_cashier_discount_basis_points must be between 0 and 10000"));
     }
-    let non_positive = |v: &Option<Option<rust_decimal::Decimal>>| v.flatten().is_some_and(|q| q <= rust_decimal::Decimal::ZERO);
-    if non_positive(&body.adjustment_approval_quantity) || non_positive(&body.write_off_approval_quantity) {
-        return Err(ApiError::bad_request("approval quantities must be positive"));
-    }
     if body.expiry_warning_days.is_some_and(|v| v < 0) {
         return Err(ApiError::bad_request("expiry_warning_days must not be negative"));
     }
     if body.return_window_days.is_some_and(|v| v < 0) {
         return Err(ApiError::bad_request("return_window_days must not be negative"));
-    }
-    if body.refund_approval_threshold_minor.flatten().is_some_and(|v| v <= 0) {
-        return Err(ApiError::bad_request("refund_approval_threshold_minor must be positive"));
     }
     if let Some(conditions) = &body.restockable_conditions {
         if let Some(bad) = conditions.iter().find(|c| !crate::returns::models::CONDITIONS.contains(&c.as_str())) {
@@ -151,13 +131,10 @@ pub async fn update_settings(
              receipt_header = COALESCE($12, receipt_header),
              receipt_footer = COALESCE($13, receipt_footer),
              return_window_days = COALESCE($14, return_window_days),
-             refund_approval_threshold_minor = CASE WHEN $15 THEN $16 ELSE refund_approval_threshold_minor END,
-             restockable_conditions = COALESCE($17::atlas.item_condition[], restockable_conditions),
-             allow_expired_sale = COALESCE($18, allow_expired_sale),
-             expiry_warning_days = COALESCE($19, expiry_warning_days),
-             adjustment_approval_quantity = CASE WHEN $20 THEN $21 ELSE adjustment_approval_quantity END,
-             write_off_approval_quantity = CASE WHEN $22 THEN $23 ELSE write_off_approval_quantity END,
-             allow_self_approval = COALESCE($24, allow_self_approval),
+             restockable_conditions = COALESCE($15::atlas.item_condition[], restockable_conditions),
+             allow_expired_sale = COALESCE($16, allow_expired_sale),
+             expiry_warning_days = COALESCE($17, expiry_warning_days),
+             allow_self_approval = COALESCE($18, allow_self_approval),
              updated_at = now()
          WHERE id = $1",
     )
@@ -175,15 +152,9 @@ pub async fn update_settings(
     .bind(&body.receipt_header)
     .bind(&body.receipt_footer)
     .bind(body.return_window_days)
-    .bind(body.refund_approval_threshold_minor.is_some())
-    .bind(body.refund_approval_threshold_minor.flatten())
     .bind(&body.restockable_conditions)
     .bind(body.allow_expired_sale)
     .bind(body.expiry_warning_days)
-    .bind(body.adjustment_approval_quantity.is_some())
-    .bind(body.adjustment_approval_quantity.flatten())
-    .bind(body.write_off_approval_quantity.is_some())
-    .bind(body.write_off_approval_quantity.flatten())
     .bind(body.allow_self_approval)
     .execute(&mut *tx)
     .await?;

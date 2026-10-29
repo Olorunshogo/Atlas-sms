@@ -149,3 +149,32 @@ async fn a_duplicate_category_name_is_refused(pool: PgPool) {
     let (status, _) = post(&router, "/api/v1/expense-categories", &as_user(&owner), json!({ "name": "Fuel" })).await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
+
+#[sqlx::test]
+async fn an_expense_within_the_policy_limit_is_approved_on_submit(pool: PgPool) {
+    let router = build_router(pool.clone());
+    let (owner, _) = signup_owner(&router, &pool, "expense-policy-owner@example.com").await;
+    let store = create_store(&router, &owner, "expense-policy").await;
+    let fuel = category(&router, &owner, "Fuel").await;
+    let caller = as_user(&owner);
+    approval_policy(&router, &owner, None, "expense", json!({ "limit_amount_minor": 20_000 })).await;
+
+    let (_, small) = post(&router, "/api/v1/expenses", &caller, expense(store, &fuel, 15_000, "2026-10-20")).await;
+    let (status, body) = post(&router, &format!("/api/v1/expenses/{}/submit", id_of(&small)), &caller, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["status"], "approved");
+    assert!(body["data"]["decided_by_user_id"].is_null(), "the policy decided it, not a person");
+
+    let (_, large) = post(&router, "/api/v1/expenses", &caller, expense(store, &fuel, 25_000, "2026-10-20")).await;
+    let (status, body) = post(&router, &format!("/api/v1/expenses/{}/submit", id_of(&large)), &caller, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["status"], "submitted");
+
+    // FR-27: an edit records what it replaced
+    let (_, draft) = post(&router, "/api/v1/expenses", &caller, expense(store, &fuel, 1_000, "2026-10-21")).await;
+    patch(&router, &format!("/api/v1/expenses/{}", id_of(&draft)), &caller, json!({ "amount_minor": 1_200 })).await;
+    let (_, trail) = get(&router, &format!("/api/v1/audit-events?action=expense.edit&entity_id={}", id_of(&draft)), &caller).await;
+    assert_eq!(trail["data"][0]["before"]["amount_minor"], 1_000);
+    assert_eq!(trail["data"][0]["after"]["amount_minor"], 1_200);
+    assert_eq!(trail["data"][0]["store_id"], store.to_string());
+}

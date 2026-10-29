@@ -161,6 +161,20 @@ pub async fn approve_expense(
     .ok_or_else(|| ApiError::conflict_with_code("Only a submitted expense can be approved.", codes::EXPENSE_NOT_SUBMITTED));
 }
 
+/// Within the expense policy's limit: approved with no decider, so the trail shows the policy decided it.
+pub async fn auto_approve_expense(conn: &mut PgConnection, tenant_id: Uuid, expense_id: Uuid) -> Result<Expense, ApiError> {
+    return sqlx::query_as::<_, Expense>(&format!(
+        "UPDATE atlas.expenses SET status = 'approved', decided_by_user_id = NULL, decided_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND status = 'submitted'
+         RETURNING {EXPENSE_COLUMNS}"
+    ))
+    .bind(expense_id)
+    .bind(tenant_id)
+    .fetch_optional(conn)
+    .await?
+    .ok_or_else(|| ApiError::conflict_with_code("Only a submitted expense can be approved.", codes::EXPENSE_NOT_SUBMITTED));
+}
+
 pub async fn reject_expense(
     conn: &mut PgConnection,
     tenant_id: Uuid,

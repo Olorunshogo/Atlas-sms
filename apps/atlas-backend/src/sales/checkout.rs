@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::crypto;
+use crate::customers::credit;
 use crate::error::{codes, ApiError};
 use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 use crate::payments::models::PaymentMethod;
@@ -108,7 +109,7 @@ pub async fn create_sale(
     }
 
     let methods = load_methods(conn, payload).await?;
-    let settlement = settle(payload, &priced, &store, &methods)?;
+    let settlement = settle(payload, &priced, &store, &methods, mode)?;
 
     let sale = insert_sale(conn, tenant_id, cashier_user_id, payload, &priced, &settlement, &request_hash).await?;
     insert_lines(conn, tenant_id, sale.id, &priced).await?;
@@ -139,6 +140,9 @@ pub async fn create_sale(
             },
         )
         .await?;
+        if let (true, Some(customer_id)) = (method.kind == "store_credit", payload.customer_id) {
+            credit::spend(conn, tenant_id, customer_id, input.amount_minor, sale.id, payment.id, cashier_user_id).await?;
+        }
         audit::record_change(
             conn,
             audit::Change {
@@ -303,6 +307,23 @@ async fn load_methods(conn: &mut PgConnection, payload: &CreateSaleRequest) -> R
     return Ok(methods);
 }
 
+/// Store credit needs a named customer whose balance is checked now; an offline till can't check it, so sync refuses it.
+pub fn check_store_credit(customer_id: Option<Uuid>, status: PaymentInputStatus, mode: CheckoutMode) -> Result<(), ApiError> {
+    if customer_id.is_none() {
+        return Err(ApiError::bad_request_with_code("Store credit needs the sale's customer.", codes::CUSTOMER_REQUIRED));
+    }
+    if status == PaymentInputStatus::Pending {
+        return Err(ApiError::bad_request("a store credit payment is taken at once and can't be pending"));
+    }
+    if mode == CheckoutMode::Sync {
+        return Err(ApiError::bad_request_with_code(
+            "Store credit can't be taken offline - the till can't check the customer's balance.",
+            codes::PAYMENT_METHOD_INVALID,
+        ));
+    }
+    return Ok(());
+}
+
 /**
  * Checks every payment and decides the sale's outcome (FR-16).
  * Successful payments must cover the amount due exactly - no more (change belongs on the cash row as `tendered - amount`, never as overpayment) and no less unless pending payments make up the rest (`awaiting_payment`) or the store allows pay-later for a named customer. Cash rounding applies only when cash is part of the tender.
@@ -312,6 +333,7 @@ fn settle(
     priced: &Quote,
     store: &StorePricing,
     methods: &[PaymentMethod],
+    mode: CheckoutMode,
 ) -> Result<Settlement, ApiError> {
     let mut succeeded = 0i64;
     let mut pending = 0i64;
@@ -322,10 +344,7 @@ fn settle(
             return Err(ApiError::bad_request("payment amounts must be positive"));
         }
         if method.kind == "store_credit" {
-            return Err(ApiError::bad_request_with_code(
-                "Store credit is spent through a refund to store credit, not as a checkout tender yet.",
-                codes::PAYMENT_METHOD_INVALID,
-            ));
+            check_store_credit(payload.customer_id, input.status, mode)?;
         }
         if method.requires_reference && input.reference.as_deref().is_none_or(|r| r.trim().is_empty()) {
             return Err(ApiError::bad_request_with_code(

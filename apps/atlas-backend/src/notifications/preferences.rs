@@ -5,6 +5,7 @@
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::TenantTx;
 use crate::response::ApiEnvelope;
@@ -48,6 +49,7 @@ pub async fn get_preferences(mut tx: TenantTx) -> Result<Json<ApiEnvelope<Vec<Pr
 /// `PUT /api/v1/notifications/preferences`. Saves the kinds given; the rest keep their current setting.
 pub async fn set_preferences(mut tx: TenantTx, Json(body): Json<SetPreferencesRequest>) -> Result<Json<ApiEnvelope<Vec<Preference>>>, ApiError> {
     let (user_id, tenant_id) = (tx.user_id, tx.tenant_id);
+    let before = load(&mut tx).await?;
     for preference in &body.preferences {
         sqlx::query(
             "INSERT INTO atlas.notification_preferences (user_id, tenant_id, kind, in_app, email)
@@ -63,6 +65,20 @@ pub async fn set_preferences(mut tx: TenantTx, Json(body): Json<SetPreferencesRe
         .await?;
     }
     let preferences = load(&mut tx).await?;
+    audit::record_change(
+        &mut tx,
+        audit::Change {
+            tenant_id,
+            actor_user_id: user_id,
+            device_id: None,
+            entity_type: "notification_preferences",
+            entity_id: user_id,
+            action: "notification_preferences.set",
+            before: serde_json::to_value(&before).ok(),
+            after: serde_json::to_value(&preferences).ok(),
+        },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Notification preferences saved.", preferences)));
 }

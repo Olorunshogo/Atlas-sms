@@ -35,6 +35,7 @@ behind checkout and returns in
 15. [Customers](#15-customers)
 16. [Reports](#16-reports)
     - [Notifications](#16b-notifications-fr-26)
+    - [Approvals](#16f-approvals-fr-09-fr-29)
 17. [Error codes](#17-error-codes)
 
 ---
@@ -292,12 +293,9 @@ Permission `sale.create` or `store.update` at the store. `data`:
   "receipt_header": null,
   "receipt_footer": "Thank you for shopping with us",
   "return_window_days": 7,
-  "refund_approval_threshold_minor": null,
   "restockable_conditions": ["resellable"],
   "allow_expired_sale": false,
   "expiry_warning_days": 30,
-  "adjustment_approval_quantity": null,
-  "write_off_approval_quantity": null,
   "allow_self_approval": true
 }
 ```
@@ -312,21 +310,22 @@ Permission `sale.create` or `store.update` at the store. `data`:
 | `allow_pay_later`                   | Lets a sale with a named customer complete before it's fully paid.                                                         |
 | `receipt_prefix`                    | Prefix of receipt and return numbers; defaults to the first four letters/digits of the slug, upper-cased.                  |
 | `return_window_days`                | Returns need approval after the end of this many local days after the sale.                                                |
-| `refund_approval_threshold_minor`   | A return refund at or above this needs approval. `null` means no amount limit.                                             |
 | `allow_expired_sale`                | Lets an expired batch be sold. Off, first-expiry-first-out skips it and naming it is `409 BATCH_EXPIRED`.                  |
 | `expiry_warning_days`               | How many days ahead of expiry a batch counts as `near_expiry`.                                                             |
-| `adjustment_approval_quantity`      | An adjustment bigger than this (either way) needs `stock.approve`, else `409 APPROVAL_REQUIRED`. `null` = no limit.        |
-| `write_off_approval_quantity`       | The same for write-offs.                                                                                                   |
 | `allow_self_approval`               | Off: whoever raised a count, order, expense, transfer or purchase return can't approve it (`409 APPROVAL_SELF_FORBIDDEN`). |
 | `restockable_conditions`            | Item conditions that go back into saleable stock on return.                                                                |
 
 ### `PATCH /stores/{id}/settings`
 
 Permission `store.update` at the store. Send any subset of the fields
-above except `id`, `currency` and `timezone`. Nullable fields
-(`default_tax_rate_id`, `refund_approval_threshold_minor`) are cleared by
-sending `null` explicitly; leaving a field out keeps it. Returns the
-updated settings. Audited with before and after values.
+above except `id`, `currency` and `timezone`. `default_tax_rate_id` is
+cleared by sending `null` explicitly; leaving a field out keeps it. Returns
+the updated settings. Audited with before and after values.
+
+Approval limits (refunds, stock adjustments, write-offs, price changes,
+expenses) are not store settings; they are
+[approval policies](#approval-policies-fr-29), set for the business or for
+one store.
 
 ---
 
@@ -454,6 +453,15 @@ beats all-stores, a customer group beats everyone, then higher
 A product with no matching rule can't be sold without a price override.
 `unit_price_amount_minor` may be `0` (a giveaway) but not negative,
 `min_quantity` must be above zero, and `ends_at` must be after `starts_at`.
+
+FR-09: a rule that moves the running price for the same product, store,
+group and quantity tier by more than the `price_change`
+[approval policy](#approval-policies-fr-29) (in basis points of the old
+price, either way), by someone without `price.approve`, isn't created: the
+answer is `202 Accepted` with the [approval request](#approval-requests).
+A store rule checks the store's policy and `price.approve` at that store;
+an all-stores rule, the business-wide ones. A first price, or one replacing
+a price of `0`, never needs approval.
 
 ### `GET /products/{id}/price-history?store_id=`
 
@@ -758,6 +766,12 @@ take on-hand below zero (`409 PRODUCT_OUT_OF_STOCK`) unless the store's
 `quantity` is signed and non-zero, in base units. Returns the movement:
 `{ id, store_id, product_id, stock_item_id, movement_type, quantity, reason }`.
 
+An adjustment bigger (either way) than the `stock_adjustment`
+[approval policy](#approval-policies-fr-29), by someone without
+`stock.approve`, isn't posted: the answer is `202 Accepted` with the
+[approval request](#approval-requests) in `data`, and the movement is
+posted when someone approves it.
+
 ### `GET /stock/counts?store_id=` / `POST /stock/counts`
 
 FR-12 physical counts. `GET` needs `stock.view` at the store, `POST`
@@ -873,8 +887,10 @@ them as unsellable:
 }
 ```
 
-`condition` is `opened`, `damaged`, `defective` or `expired`. Returned
-items that aren't restocked are recorded the same way, with
+`condition` is `opened`, `damaged`, `defective` or `expired`. A
+write-off bigger than the `write_off` policy, by someone without
+`stock.approve`, is held the same way as an adjustment: `202` with the
+approval request. Returned items that aren't restocked are recorded the same way, with
 `source: "sale_return"`. The list, newest first:
 `[{ id, product_id, stock_item_id, quantity, condition, source, reference_id, reason, recorded_by_user_id, created_at }]`.
 
@@ -939,6 +955,12 @@ atomic-claim-then-post pattern as a sale, so two concurrent dispatches
 can't both take the same units. `409 TRANSFER_NOT_APPROVED` outside the
 `approved` state; `409 PRODUCT_OUT_OF_STOCK` if the posting itself would
 go negative.
+
+A batch-tracked product sent with `stock_item_id: null` is split across
+the sending store's batches first-expiry-first-out, the same rule a sale
+follows; expired batches stay behind, and too little unexpired stock is
+`409 PRODUCT_OUT_OF_STOCK`. Receiving posts exactly the batches that were
+dispatched, so the same batches arrive that left.
 
 ### `POST /stock/transfers/{id}/receive`
 
@@ -1400,13 +1422,21 @@ The payments decide the outcome:
 
 The amount due includes cash rounding when any payment is cash.
 
+A `store_credit` payment spends the sale customer's balance in the same
+transaction as the sale: it needs `customer_id` (`400 CUSTOMER_REQUIRED`),
+it can't be `pending`, and a balance that doesn't cover it fails the whole
+sale with `409 INSUFFICIENT_STORE_CREDIT`. Each spend is a negative row in
+the customer's credit ledger, linked to the payment. Refunding a credit
+payment back to its original method, reversing it, or voiding its sale puts
+the credit back.
+
 Errors: everything the quote can fail with, plus `403 PRICE_OVERRIDE_FORBIDDEN`,
 `403 DISCOUNT_FORBIDDEN`, `409 PRODUCT_OUT_OF_STOCK` (checked under a
 lock), `409 SHIFT_NOT_OPEN` (closed shift) or `400 SHIFT_NOT_OPEN`
 (another store's shift), `409 TOTAL_MISMATCH`, `400 PAYMENT_INSUFFICIENT`,
 `400 PAYMENT_OVERPAID`, `400 PAYMENT_REFERENCE_REQUIRED`,
 `400 PAYMENT_METHOD_INVALID`, `409 DUPLICATE_PAYMENT_REFERENCE`,
-`409 IDEMPOTENCY_CONFLICT`.
+`409 IDEMPOTENCY_CONFLICT`, `409 INSUFFICIENT_STORE_CREDIT`.
 
 ### `POST /sync/sales`
 
@@ -1419,7 +1449,10 @@ offline. Because the sale has already happened:
 - a device price that differs from the rules is kept and recorded as an audit entry, not refused;
 - short stock is posted anyway and recorded as a stock exception for a manager to review.
 
-Payment rules and idempotency are the same as the live path.
+Payment rules and idempotency are the same as the live path, except that
+store credit is refused (`400 PAYMENT_METHOD_INVALID`): an offline till
+can't check the customer's balance, so it shouldn't offer store credit
+while offline.
 
 ### `GET /sales`
 
@@ -1767,7 +1800,7 @@ it is saved as `pending_approval` with its quantities held. It needs
 approval when any of these holds:
 
 - it's after the end of the `return_window_days`-th local day after the sale (`outside_window: true`);
-- its refund is at or above `refund_approval_threshold_minor`;
+- its refund is at or above the store's `refund` [approval policy](#approval-policies-fr-29);
 - the caller doesn't hold `sale.refund`.
 
 Errors: `409 SALE_NOT_COMPLETED`, `409 RETURN_QUANTITY_EXCEEDED` (the
@@ -1926,11 +1959,15 @@ purchase history, newest first, from the stores where the caller holds
 ### Business reports (FR-25)
 
 `GET /reports/summary`, `/reports/sales-by-product`, `/reports/inventory-valuation`,
-`/reports/purchases-by-supplier` and `/reports/expenses-by-category` all take
-`from`, `to` (timestamps; `from` inclusive, `to` exclusive) and `store_id`,
-plus the filters listed for each. Each covers only the stores where the
-caller holds `report.view`; naming another store is `403`. Add
-`format=csv` for a CSV download instead of JSON.
+`/reports/purchases-by-supplier`, `/reports/expenses-by-category`,
+`/reports/stock-movements`, `/reports/transfers`, `/reports/returns` and
+`/reports/payments-by-method` all take `from`, `to` (timestamps; `from`
+inclusive, `to` exclusive) and `store_id`, plus the filters listed for
+each. Each covers only the stores where the caller holds `report.view`;
+naming another store is `403`. Add `format=csv` for a CSV download or
+`format=pdf` for a printable PDF table (FR-28) instead of JSON. The PDF
+cuts a cell longer than its column short with `~`; the CSV carries the full
+values.
 
 Definitions, kept separate rather than folded together: `revenue_minor` is
 completed sales by completion time; `net_revenue_minor` is revenue less
@@ -1994,9 +2031,38 @@ best sellers first. `quantity` is in base units.
 `[{ supplier_id, supplier_name, orders_count, received_minor, returned_minor, net_purchases_minor }]`:
 receipts and confirmed returns in the window.
 
-### `GET /reports/expenses-by-category?from=&to=&store_id=`
+### `GET /reports/expenses-by-category?from=&to=&store_id=&category_id=`
 
 `[{ store_id, category_id, category_name, approved_minor, paid_minor, unpaid_minor }]`, approved expenses only.
+
+### `GET /reports/stock-movements?from=&to=&store_id=&product_id=&category_id=&movement_type=&reference_id=`
+
+Every stock movement, newest first, at most 5000 rows (narrow the filters
+for more). `movement_type` is one movement type (`sale`, `adjustment`,
+`transfer_out`, ...); `reference_id` is the transaction behind it (a sale,
+transfer, purchase order or count).
+`[{ created_at, store_id, product_id, product_name, stock_item_id, movement_type, quantity, reason, reference_id, created_by_user_id }]`.
+
+### `GET /reports/transfers?from=&to=&store_id=&product_id=`
+
+Transfers into or out of the stores, by when they were requested.
+`[{ transfer_id, from_store_id, to_store_id, product_id, product_name, quantity, status, requested_at, dispatched_at, received_at }]`.
+
+### `GET /reports/returns?from=&to=&store_id=&product_id=&cashier_user_id=`
+
+Returns by when they were raised, any status. `cashier_user_id` is who
+rang up the original sale; `product_id` keeps returns with a line of that
+product.
+`[{ return_id, return_number, store_id, sale_id, status, reason_code, refund_method, refund_total_minor, cashier_user_id, requested_by_user_id, created_at, completed_at }]`.
+
+### `GET /reports/payments-by-method?from=&to=&store_id=&cashier_user_id=`
+
+Per store and payment kind: `payments_count` and `collected_minor`
+(succeeded payments by when they were taken), `refunded_minor` (executed
+refunds by when they ran, by the method the money went out through) and
+`net_minor`. The same definitions as the summary, so the two reconcile.
+`cashier_user_id` is who took the payment or ran the refund.
+`[{ store_id, method, payments_count, collected_minor, refunded_minor, net_minor }]`.
 
 ### `GET /reports/payments/reconciliation?store_id=&shift_id=&from=&to=`
 
@@ -2174,8 +2240,14 @@ Needs `audit.view`. Problems that didn't fail a request but need a person.
 ### `GET /operations/issues?status=&kind=` / `POST /operations/issues/{id}/resolve`
 
 `status` is `open` (default), `resolved` or `all`. `kind` is
-`notification_failed` (a notification couldn't be written and was dropped)
-or `email_delivery_failed`.
+`notification_failed` (a notification couldn't be written and was dropped),
+`email_delivery_failed`, or an integration failure: `payment_start_failed`
+(the payment gateway refused to start an online payment),
+`courier_failed` (the courier wouldn't take a shipment) or `refund_failed`
+(a payment landed on an order already cancelled and the gateway refund
+didn't go through; the payment stays `succeeded` for a person to refund).
+An integration failure is recorded even though the request that hit it
+failed.
 `[{ id, kind, detail, reference_id, resolved_at, created_at }]`.
 
 ### `GET /operations/stock-exceptions?store_id=&include_resolved=` / `POST /operations/stock-exceptions/{id}/resolve`
@@ -2525,6 +2597,117 @@ it's `pending_payment`).
 
 ---
 
+## 16f. Approvals (FR-09, FR-29)
+
+A policy sets how far an operation may go before someone has to approve
+it. A change past its limit, made by someone without the approve
+permission, is held as a request instead of applied; approving it applies
+it. The applied change keeps the requester as its author, and its audit
+entry carries `approval_request_id` and `approved_by_user_id`, so a
+held stock adjustment can be traced from movement to request to approver
+(FR-27).
+
+| `operation`        | Limit                | Over the limit                                                                                                                                                        | Approve permission |
+| ------------------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `price_change`     | `limit_basis_points` | Price rule moving the running price by more than this, either way: held                                                                                               | `price.approve`    |
+| `stock_adjustment` | `limit_quantity`     | Adjustment bigger than this, either way: held                                                                                                                         | `stock.approve`    |
+| `write_off`        | `limit_quantity`     | Write-off bigger than this: held                                                                                                                                      | `stock.approve`    |
+| `refund`           | `limit_amount_minor` | Return refund at or above this waits as `pending_approval` (the return's own flow)                                                                                    | `sale.refund`      |
+| `expense`          | `limit_amount_minor` | Expense above this waits for approval. At or under it, submitting approves it with no decider (`expense.auto_approve`). With no policy, every expense needs approval. | `expense.manage`   |
+
+Self-approval follows the store's `allow_self_approval`; a business-wide
+request (an all-stores price rule) can never be approved by its requester.
+
+### Approval policies (FR-29)
+
+### `GET /approval-policies?store_id=`
+
+Without `store_id`, every policy (`tenant.manage`); with it, the
+business-wide policies plus that store's own (`store.update` there). A
+store's own policy wins over the business-wide one for that store.
+`[{ id, store_id, operation, limit_amount_minor, limit_quantity, limit_basis_points, updated_by_user_id, created_at, updated_at }]`.
+
+### `PUT /approval-policies`
+
+Creates or replaces the policy for one operation and scope:
+
+```json
+{
+  "store_id": "0192...", // null = business-wide (needs tenant.manage)
+  "operation": "price_change",
+  "limit_basis_points": 2000 // exactly one limit, the one the table above names, positive
+}
+```
+
+Store scope needs `store.update` at the store. The wrong limit for the
+operation, or more than one, is `400 VALIDATION_FAILED`. Audited
+(`approval_policy.set`) with before and after values.
+
+### `DELETE /approval-policies/{id}`
+
+Same permissions. The operation falls back to the business-wide policy,
+or no limit. Audited (`approval_policy.delete`).
+
+### Approval requests
+
+### `GET /approval-requests?status=&store_id=&operation=&limit=`
+
+`status` is `pending` (default), `approved`, `rejected`, `cancelled` or
+`all`. Lists the requests the caller raised plus those they could decide.
+Newest first, default 50, at most 200.
+
+```json
+{
+  "id": "0192...",
+  "store_id": "0192...",
+  "operation": "stock_adjustment",
+  "status": "pending",
+  "subject_id": "0192...", // the product
+  "payload": {
+    "store_id": "0192...",
+    "product_id": "0192...",
+    "stock_item_id": null,
+    "quantity": "-20",
+    "reason": "Flood damage"
+  },
+  "summary": "Adjust stock by -20: Flood damage",
+  "requested_by_user_id": "0192...",
+  "requested_at": "2026-10-29T10:00:00Z",
+  "decided_by_user_id": null,
+  "decided_at": null,
+  "decision_note": null,
+  "result_entity_type": null, // stock_movement | unsellable_stock | price_rule once approved
+  "result_id": null
+}
+```
+
+`payload` is the original request body, replayed on approval. Holders of
+the approve permission are notified (`approval_requested`); the requester
+is notified of the decision (`approval_decided`).
+
+### `GET /approval-requests/{id}`
+
+The same visibility as the list; anyone else gets `404`.
+
+### `POST /approval-requests/{id}/approve`
+
+The operation's approve permission where the change applies. Applies the
+held change in the same transaction; if it no longer fits (stock since
+sold, `409 PRODUCT_OUT_OF_STOCK`), nothing changes and the request stays
+pending. `409 APPROVAL_NOT_PENDING` once decided,
+`409 APPROVAL_SELF_FORBIDDEN` per the self-approval rule. No body.
+
+### `POST /approval-requests/{id}/reject`
+
+Same permission and self-approval rule. Body `{ reason }`, kept as
+`decision_note`.
+
+### `POST /approval-requests/{id}/cancel`
+
+Only the requester, only while pending. No body.
+
+---
+
 ## 17. Error codes
 
 | Code                       | Status  | Meaning / what the client should do                                                          |
@@ -2562,7 +2745,8 @@ it's `pending_payment`).
 | `ORDER_NOT_CANCELLABLE` | 409 | Cancel after shipping or of a finished order. |
 | `REFUND_FAILED` | 502 | The payment gateway refused the refund for a cancelled order. |
 | `COURIER_FAILED` | 502 | The courier refused the shipment booking. |
-| `APPROVAL_REQUIRED` | 409 | Over the store's adjustment or write-off threshold without `stock.approve`. |
+| `APPROVAL_NOT_PENDING` | 409 | The approval request was already approved, rejected or cancelled. |
+| `INSUFFICIENT_STORE_CREDIT` | 409 | A store credit payment is more than the customer's balance; the message says what's left. |
 | `IMPORT_INVALID` | 422 | An import had invalid rows; `data.errors` lists them and nothing was written. |
 | `PURCHASE_ORDER_NOT_CANCELLABLE` | 409 | Cancel an order that is already fully received or cancelled. |
 | `PURCHASE_ORDER_NOT_SUBMITTED` | 409 | Approve on an order that isn't `submitted`. |
@@ -2581,7 +2765,7 @@ it's `pending_payment`).
 | `PAYMENT_INSUFFICIENT` | 400 | Payments don't cover the amount due. |
 | `PAYMENT_OVERPAID` | 400 | Payments exceed what's due; record cash change as tendered. |
 | `PAYMENT_REFERENCE_REQUIRED` | 400 | This method needs a transaction reference. |
-| `PAYMENT_METHOD_INVALID` | 400 | Unknown or inactive method, or one that can't be used here (store credit at checkout). |
+| `PAYMENT_METHOD_INVALID` | 400 | Unknown or inactive method, or one that can't be used here (store credit on an offline sale). |
 | `PAYMENT_METHOD_EXISTS` | 409 | Payment method code already in use. |
 | `DUPLICATE_PAYMENT_REFERENCE` | 409 | That reference is already on a live payment of this method. |
 | `INVALID_PAYMENT_TRANSITION` | 409 | The payment can't move to that status from where it is. |
@@ -2591,7 +2775,7 @@ it's `pending_payment`).
 | `ITEM_NOT_RETURNABLE` | 400 | The product is marked non-returnable. |
 | `REFUND_AMOUNT_EXCEEDED` | 409 | More than was paid and not yet refunded, on the sale or the payment. |
 | `RETURN_NOT_PENDING` | 409 | The return isn't waiting for approval. |
-| `APPROVAL_SELF_FORBIDDEN` | 403 | The person who started a return can't approve it. |
+| `APPROVAL_SELF_FORBIDDEN` | 403 | The person who started a return can't approve it. The same code comes back as `409` for a count, order, expense, transfer, purchase return or approval request when the store turns self-approval off. |
 | `CUSTOMER_REQUIRED` | 400 | Store credit needs a customer on the sale. |
 | `CUSTOMER_PHONE_EXISTS` | 409 | A customer with this phone already exists; look them up. |
 | `BARCODE_EXISTS` | 409 | The barcode is already assigned to a product. |

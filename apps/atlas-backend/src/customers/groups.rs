@@ -66,6 +66,7 @@ pub async fn rename_group(
     assert_manage(&mut tx).await?;
     let name = required_text("name", &body.name, 100)?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    let before = audit::snapshot(&mut tx, "customer_groups", "id", group_id).await?;
     let group = sqlx::query_as::<_, CustomerGroup>("UPDATE atlas.customer_groups SET name = $2 WHERE id = $1 AND tenant_id = $3 RETURNING id, name")
         .bind(group_id)
         .bind(name)
@@ -73,7 +74,11 @@ pub async fn rename_group(
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| ApiError::not_found("Customer group not found."))?;
-    audit::record(&mut tx, tenant_id, user_id, "customer_group", group.id, "customer_group.rename", serde_json::to_value(&group).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "customer_group", entity_id: group.id, action: "customer_group.rename", table: "customer_groups", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Customer group renamed.", group)));
 }

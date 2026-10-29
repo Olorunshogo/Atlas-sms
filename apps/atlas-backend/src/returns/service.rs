@@ -3,8 +3,10 @@ use rust_decimal::Decimal;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::approvals;
 use crate::audit;
 use crate::crypto;
+use crate::customers::credit;
 use crate::error::{codes, ApiError};
 use crate::inventory::{self, MovementType, NegativeStockPolicy, Posting, PostingLine};
 use crate::payments::models::Payment;
@@ -27,7 +29,6 @@ const RETURN_COLUMNS: &str = "id, store_id, sale_id, return_number, status::text
 struct ReturnPolicy {
     timezone: String,
     return_window_days: i32,
-    refund_approval_threshold_minor: Option<i64>,
     restockable_conditions: Vec<String>,
 }
 
@@ -132,7 +133,7 @@ pub async fn create_return(
         return Err(ApiError::conflict_with_code("Only a completed sale can be returned against.", codes::SALE_NOT_COMPLETED));
     }
     let policy = sqlx::query_as::<_, ReturnPolicy>(
-        "SELECT timezone, return_window_days, refund_approval_threshold_minor, restockable_conditions::text[] AS restockable_conditions
+        "SELECT timezone, return_window_days, restockable_conditions::text[] AS restockable_conditions
          FROM atlas.stores WHERE id = $1",
     )
     .bind(sale.store_id)
@@ -200,7 +201,8 @@ pub async fn create_return(
     }
 
     let can_refund = roles::service::has_permission(conn, user_id, tenant_id, Some(sale.store_id), "sale.refund").await?;
-    let over_threshold = policy.refund_approval_threshold_minor.is_some_and(|t| refund_total >= t);
+    let refund_limit = approvals::amount_limit(conn, tenant_id, sale.store_id, approvals::Operation::Refund).await?;
+    let over_threshold = refund_limit.is_some_and(|t| refund_total >= t);
     let needs_approval = outside_window || over_threshold || !can_refund;
 
     sqlx::query(
@@ -527,8 +529,11 @@ async fn refund_to_original(conn: &mut PgConnection, ctx: &RefundContext<'_>, am
             continue;
         }
         let method_id = payment.payment_method_id.ok_or_else(|| ApiError::Internal("payment without a method".to_string()))?;
-        insert_refund(conn, ctx, Some(payment.id), method_id, take, None).await?;
+        let refund_id = insert_refund(conn, ctx, Some(payment.id), method_id, take, None).await?;
         payments::apply_refund_to_payment(conn, payment.id, take).await?;
+        if payment.method == "store_credit" {
+            credit::give_back(conn, ctx.tenant_id, payment.id, take, Some(refund_id), ctx.executor_id).await?;
+        }
         remaining -= take;
     }
     if remaining > 0 {
@@ -543,25 +548,19 @@ async fn refund_to_original(conn: &mut PgConnection, ctx: &RefundContext<'_>, am
 async fn refund_to_store_credit(conn: &mut PgConnection, ctx: &RefundContext<'_>, customer_id: Uuid, amount_minor: i64) -> Result<(), ApiError> {
     let method = payments::store_credit_method(conn).await?;
     let refund_id = insert_refund(conn, ctx, None, method.id, amount_minor, None).await?;
-    sqlx::query(
-        "INSERT INTO atlas.customer_credit_movements (id, tenant_id, customer_id, amount_minor, refund_id, sale_id, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    return credit::add(
+        conn,
+        credit::Entry {
+            tenant_id: ctx.tenant_id,
+            customer_id,
+            amount_minor,
+            sale_id: Some(ctx.sale_id),
+            refund_id: Some(refund_id),
+            payment_id: None,
+            user_id: ctx.executor_id,
+        },
     )
-    .bind(Uuid::now_v7())
-    .bind(ctx.tenant_id)
-    .bind(customer_id)
-    .bind(amount_minor)
-    .bind(refund_id)
-    .bind(ctx.sale_id)
-    .bind(ctx.executor_id)
-    .execute(&mut *conn)
-    .await?;
-    sqlx::query("UPDATE atlas.customers SET store_credit_amount_minor = store_credit_amount_minor + $2, updated_at = now() WHERE id = $1")
-        .bind(customer_id)
-        .bind(amount_minor)
-        .execute(&mut *conn)
-        .await?;
-    return Ok(());
+    .await;
 }
 
 /// Fails early, before anything is written, if the chosen refund route can't work for this sale.

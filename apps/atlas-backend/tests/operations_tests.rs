@@ -147,6 +147,63 @@ async fn the_summary_separates_revenue_tax_cost_and_expenses_and_adds_up_across_
 }
 
 #[sqlx::test]
+async fn movement_transfer_return_and_payment_reports_reconcile_and_download_as_pdf(pool: PgPool) {
+    let s = shop(&pool, build_router(pool.clone()), "more-reports-owner@example.com").await;
+    let soap = sellable(&s.router, &s.owner, s.lagos, s.unit, "Soap", "SOAP-M", 1_000, "20").await;
+    list_at(&s.router, &s.owner, soap, s.abuja).await;
+    let shift = open_shift(&s.router, &s.owner, s.lagos).await;
+    let cash = method_id(&s.router, &s.owner, "cash").await;
+    let card = method_id(&s.router, &s.owner, "card").await;
+    let (_, sale) = post(&s.router, "/api/v1/sales", &as_user(&s.owner), sale_request(s.lagos, shift, vec![cart_line(soap, s.unit, "3")], vec![pay(cash, 2_000), pay(card, 1_000)])).await;
+    let sale_id = id_of(&sale);
+    let line_id = sale["data"]["lines"][0]["id"].as_str().unwrap().to_string();
+    let (status, body) = post(
+        &s.router,
+        &format!("/api/v1/sales/{}/returns", sale_id),
+        &as_user(&s.owner),
+        json!({ "id": Uuid::now_v7(), "device_id": "till-1", "reason_code": "changed_mind", "lines": [{ "sale_line_id": line_id, "quantity": "1", "condition": "resellable" }], "refund": { "method": "original" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    let (_, transfer) = post(
+        &s.router,
+        "/api/v1/stock/transfers",
+        &as_user(&s.owner),
+        json!({ "from_store_id": s.lagos, "to_store_id": s.abuja, "product_id": soap, "stock_item_id": null, "quantity": "5", "reason": "Rebalance" }),
+    )
+    .await;
+
+    let (_, movements) = get(&s.router, &format!("/api/v1/reports/stock-movements?reference_id={}", sale_id), &as_user(&s.owner)).await;
+    let rows = movements["data"].as_array().unwrap();
+    assert!(rows.iter().all(|m| m["reference_id"] == sale_id.as_str()));
+    assert_eq!(rows.iter().filter(|m| m["movement_type"] == "sale").count(), 1);
+
+    let (_, transfers) = get(&s.router, &format!("/api/v1/reports/transfers?store_id={}", s.abuja), &as_user(&s.owner)).await;
+    assert_eq!(transfers["data"][0]["transfer_id"], id_of(&transfer));
+    assert_eq!(transfers["data"][0]["status"], "requested");
+
+    let (_, returns) = get(&s.router, &format!("/api/v1/reports/returns?product_id={}", soap), &as_user(&s.owner)).await;
+    assert_eq!(returns["data"][0]["refund_total_minor"], 1_000);
+
+    // The refund went back to the card first; per-method net adds up to the summary
+    let (_, by_method) = get(&s.router, "/api/v1/reports/payments-by-method", &as_user(&s.owner)).await;
+    let methods = by_method["data"].as_array().unwrap();
+    let card_row = methods.iter().find(|m| m["method"] == "card").unwrap();
+    assert_eq!(card_row["collected_minor"], 1_000);
+    assert_eq!(card_row["refunded_minor"], 1_000);
+    let net: i64 = methods.iter().map(|m| m["net_minor"].as_i64().unwrap()).sum();
+    let (_, summary) = get(&s.router, "/api/v1/reports/summary", &as_user(&s.owner)).await;
+    let totals = &summary["data"]["totals"];
+    assert_eq!(net, totals["payments_collected_minor"].as_i64().unwrap() - totals["refunds_minor"].as_i64().unwrap());
+
+    let (status, content_type, pdf) = call_raw(&s.router, "GET", "/api/v1/reports/summary?format=pdf", Some(&s.owner), None, "").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type.unwrap(), "application/pdf");
+    let pdf = String::from_utf8(pdf).unwrap();
+    assert!(pdf.starts_with("%PDF-1.4") && pdf.contains("(Summary  -  page 1 of 1)"));
+}
+
+#[sqlx::test]
 async fn a_store_manager_only_sees_reports_for_their_own_store(pool: PgPool) {
     let s = shop(&pool, build_router(pool.clone()), "reports-scope@example.com").await;
     let (_, manager) = seed_staff(&pool, s.tenant_id, s.lagos, "store_manager").await;
@@ -378,26 +435,183 @@ async fn suppliers_and_opening_stock_import_from_their_templates(pool: PgPool) {
 // === FR-29 approval policy
 
 #[sqlx::test]
-async fn a_change_over_the_threshold_waits_for_someone_with_stock_approve(pool: PgPool) {
+async fn a_change_over_the_policy_is_held_until_someone_with_stock_approve_decides(pool: PgPool) {
     let s = shop(&pool, build_router(pool.clone()), "threshold-owner@example.com").await;
     let soap = create_product(&s.router, &s.owner, s.unit, "Soap", "SOAP-T").await;
     stock_up(&s.router, &s.owner, s.lagos, soap, "100").await;
-    store_settings(&s.router, &s.owner, s.lagos, json!({ "adjustment_approval_quantity": "10", "write_off_approval_quantity": "5" })).await;
-    let (_, clerk) = seed_staff(&pool, s.tenant_id, s.lagos, "stock_clerk").await;
+    approval_policy(&s.router, &s.owner, Some(s.lagos), "stock_adjustment", json!({ "limit_quantity": "10" })).await;
+    approval_policy(&s.router, &s.owner, Some(s.lagos), "write_off", json!({ "limit_quantity": "5" })).await;
+    let (clerk_id, clerk) = seed_staff(&pool, s.tenant_id, s.lagos, "stock_clerk").await;
+    let lagos = s.lagos.to_string();
+    let at_lagos = at_store(&clerk, &lagos);
 
-    let (status, body) = adjust(&s, &clerk, s.lagos, soap, "-20").await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["code"], "APPROVAL_REQUIRED");
+    let (status, held) = adjust(&s, &clerk, s.lagos, soap, "-20").await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{}", held);
+    assert_eq!(held["data"]["status"], "pending");
+    assert_eq!(held["data"]["operation"], "stock_adjustment");
+    let request_id = id_of(&held);
+    assert_eq!(on_hand(&s.router, &s.owner, s.lagos, soap).await, "100", "nothing moves while it waits");
     let (status, _) = adjust(&s, &clerk, s.lagos, soap, "-8").await;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = adjust(&s, &s.owner, s.lagos, soap, "-20").await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "the owner holds stock.approve");
 
-    let write_off = |quantity: &str| json!({ "store_id": s.lagos, "product_id": soap, "stock_item_id": null, "quantity": quantity, "condition": "damaged", "reason": "Crushed" });
-    let (status, body) = post(&s.router, "/api/v1/stock/write-offs", &at_store(&clerk, &s.lagos.to_string()), write_off("6")).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["code"], "APPROVAL_REQUIRED");
+    let write_off = json!({ "store_id": s.lagos, "product_id": soap, "stock_item_id": null, "quantity": "6", "condition": "damaged", "reason": "Crushed" });
+    let (status, held_write_off) = post(&s.router, "/api/v1/stock/write-offs", &at_lagos, write_off).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{}", held_write_off);
     assert_eq!(on_hand(&s.router, &s.owner, s.lagos, soap).await.parse::<f64>().unwrap(), 72.0);
+
+    // The approver sees it waiting; the clerk sees their own two
+    let (_, waiting) = get(&s.router, "/api/v1/approval-requests", &as_user(&s.owner)).await;
+    assert_eq!(waiting["data"].as_array().unwrap().len(), 2);
+    let (_, mine) = get(&s.router, "/api/v1/approval-requests", &at_lagos).await;
+    assert_eq!(mine["data"].as_array().unwrap().len(), 2);
+
+    let approve = format!("/api/v1/approval-requests/{}/approve", request_id);
+    let (status, _) = post(&s.router, &approve, &at_lagos, json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a clerk can't approve");
+    let (status, approved) = post(&s.router, &approve, &as_user(&s.owner), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", approved);
+    assert_eq!(approved["data"]["status"], "approved");
+    assert_eq!(approved["data"]["result_entity_type"], "stock_movement");
+    assert_eq!(on_hand(&s.router, &s.owner, s.lagos, soap).await.parse::<f64>().unwrap(), 52.0);
+    let (status, body) = post(&s.router, &approve, &as_user(&s.owner), json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "APPROVAL_NOT_PENDING");
+
+    // FR-27: the adjustment traces to its author, reason, approval and movement
+    let movement_id = approved["data"]["result_id"].as_str().unwrap();
+    let (_, trail) = get(&s.router, &format!("/api/v1/audit-events?action=stock.adjust&entity_id={}", movement_id), &as_user(&s.owner)).await;
+    let entry = &trail["data"][0];
+    assert_eq!(entry["actor_user_id"], clerk_id.to_string());
+    assert_eq!(entry["after"]["reason"], "Recount");
+    assert_eq!(entry["after"]["approval_request_id"], request_id);
+    assert!(entry["after"]["approved_by_user_id"].is_string());
+
+    let reject = format!("/api/v1/approval-requests/{}/reject", id_of(&held_write_off));
+    let (status, rejected) = post(&s.router, &reject, &as_user(&s.owner), json!({ "reason": "Still sellable" })).await;
+    assert_eq!(status, StatusCode::OK, "{}", rejected);
+    assert_eq!(rejected["data"]["decision_note"], "Still sellable");
+    assert_eq!(on_hand(&s.router, &s.owner, s.lagos, soap).await.parse::<f64>().unwrap(), 52.0);
+
+    let (_, inbox) = get(&s.router, "/api/v1/notifications", &at_lagos).await;
+    let decided = inbox["data"].as_array().unwrap().iter().filter(|n| n["kind"] == "approval_decided").count();
+    assert_eq!(decided, 2);
+}
+
+#[sqlx::test]
+async fn approving_a_held_change_that_no_longer_fits_leaves_it_pending(pool: PgPool) {
+    let s = shop(&pool, build_router(pool.clone()), "stale-approval@example.com").await;
+    let soap = create_product(&s.router, &s.owner, s.unit, "Soap", "SOAP-ST").await;
+    stock_up(&s.router, &s.owner, s.lagos, soap, "30").await;
+    approval_policy(&s.router, &s.owner, Some(s.lagos), "stock_adjustment", json!({ "limit_quantity": "10" })).await;
+    let (_, clerk) = seed_staff(&pool, s.tenant_id, s.lagos, "stock_clerk").await;
+
+    let (status, held) = adjust(&s, &clerk, s.lagos, soap, "-25").await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    adjust(&s, &s.owner, s.lagos, soap, "-20").await;
+
+    let (status, body) = post(&s.router, &format!("/api/v1/approval-requests/{}/approve", id_of(&held)), &as_user(&s.owner), json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "PRODUCT_OUT_OF_STOCK");
+    let (_, request) = get(&s.router, &format!("/api/v1/approval-requests/{}", id_of(&held)), &as_user(&s.owner)).await;
+    assert_eq!(request["data"]["status"], "pending");
+
+    let (status, _) = post(&s.router, &format!("/api/v1/approval-requests/{}/cancel", id_of(&held)), &as_user(&s.owner), json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "only the requester cancels");
+    let (status, body) = post(&s.router, &format!("/api/v1/approval-requests/{}/cancel", id_of(&held)), &at_store(&clerk, &s.lagos.to_string()), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+    assert_eq!(body["data"]["status"], "cancelled");
+}
+
+/// A business-wide catalogue editor: `product.manage` everywhere, but not `price.approve`. Returns their token.
+async fn catalogue_editor(pool: &PgPool, tenant_id: Uuid) -> String {
+    let user_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO atlas.users (id, full_name, email, password_hash, is_email_verified) VALUES ($1, 'Catalogue editor', $2, 'not-a-real-hash', true)")
+        .bind(user_id)
+        .bind(format!("editor-{}@example.com", user_id))
+        .execute(pool)
+        .await
+        .unwrap();
+    let role_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO atlas.roles (id, tenant_id, name, permissions) VALUES ($1, $2, 'catalogue_editor', ARRAY['product.manage']::atlas.permission[])")
+        .bind(role_id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO atlas.role_grants (id, user_id, role_id, scope, tenant_id, status, granted_by_user_id)
+         VALUES ($1, $2, $3, 'tenant', $4, 'active', $2)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(user_id)
+    .bind(role_id)
+    .bind(tenant_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    return issue_token(user_id, tenant_id);
+}
+
+#[sqlx::test]
+async fn fr09_a_big_price_change_waits_for_price_approve(pool: PgPool) {
+    let s = shop(&pool, build_router(pool.clone()), "price-approval@example.com").await;
+    let soap = create_product(&s.router, &s.owner, s.unit, "Soap", "SOAP-P").await;
+    price_rule(&s.router, &s.owner, soap, Some(s.lagos), 1_000).await;
+    approval_policy(&s.router, &s.owner, None, "price_change", json!({ "limit_basis_points": 2_000 })).await;
+    let editor = catalogue_editor(&pool, s.tenant_id).await;
+    let at_lagos = as_user(&editor);
+    let rule = |amount: i64| json!({ "store_id": s.lagos, "unit_price_amount_minor": amount });
+    let path = format!("/api/v1/products/{}/price-rules", soap);
+
+    let (status, body) = post(&s.router, &path, &at_lagos, rule(1_100)).await;
+    assert_eq!(status, StatusCode::OK, "10% is within the policy: {}", body);
+    let (status, held) = post(&s.router, &path, &at_lagos, rule(1_500)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{}", held);
+    assert_eq!(held["data"]["operation"], "price_change");
+    let (_, rules) = get(&s.router, &path, &as_user(&s.owner)).await;
+    assert_eq!(rules["data"].as_array().unwrap().len(), 2, "the held price isn't a rule yet");
+
+    let (status, approved) = post(&s.router, &format!("/api/v1/approval-requests/{}/approve", id_of(&held)), &as_user(&s.owner), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", approved);
+    let (_, history) = get(&s.router, &format!("/api/v1/products/{}/price-history", soap), &as_user(&s.owner)).await;
+    assert_eq!(history["data"][0]["previous_amount_minor"], 1_100);
+    assert_eq!(history["data"][0]["new_amount_minor"], 1_500);
+
+    // A drop counts too, and the store's own policy wins over the business-wide one
+    let (status, _) = post(&s.router, &path, &at_lagos, rule(600)).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    approval_policy(&s.router, &s.owner, Some(s.lagos), "price_change", json!({ "limit_basis_points": 9_000 })).await;
+    let (status, body) = post(&s.router, &path, &at_lagos, rule(600)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
+#[sqlx::test]
+async fn policies_take_one_limit_in_the_operations_unit_and_changes_are_audited(pool: PgPool) {
+    let s = shop(&pool, build_router(pool.clone()), "policy-admin@example.com").await;
+    let owner = as_user(&s.owner);
+    let put = |body: Value| call(&s.router, "PUT", "/api/v1/approval-policies", Some(&owner), Some(body));
+    let (status, body) = put(json!({ "store_id": null, "operation": "price_change", "limit_quantity": "5" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{}", body);
+    let (status, _) = put(json!({ "store_id": null, "operation": "refund", "limit_amount_minor": 10, "limit_quantity": "5" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (_, manager) = seed_staff(&pool, s.tenant_id, s.lagos, "store_manager").await;
+    let (status, _) = call(&s.router, "PUT", "/api/v1/approval-policies", Some(&at_store(&manager, &s.lagos.to_string())), Some(json!({ "store_id": null, "operation": "refund", "limit_amount_minor": 50_000 }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "business-wide needs tenant.manage");
+
+    approval_policy(&s.router, &s.owner, Some(s.lagos), "refund", json!({ "limit_amount_minor": 50_000 })).await;
+    approval_policy(&s.router, &s.owner, Some(s.lagos), "refund", json!({ "limit_amount_minor": 80_000 })).await;
+    let (_, policies) = get(&s.router, &format!("/api/v1/approval-policies?store_id={}", s.lagos), &as_user(&s.owner)).await;
+    assert_eq!(policies["data"].as_array().unwrap().len(), 1, "a second PUT replaces, not adds");
+    let (_, trail) = get(&s.router, "/api/v1/audit-events?action=approval_policy.set", &as_user(&s.owner)).await;
+    assert_eq!(trail["data"][0]["before"]["limit_amount_minor"], 50_000);
+    assert_eq!(trail["data"][0]["after"]["limit_amount_minor"], 80_000);
+    assert_eq!(trail["data"][0]["store_id"], s.lagos.to_string());
+
+    let (status, _) = delete(&s.router, &format!("/api/v1/approval-policies/{}", policies["data"][0]["id"].as_str().unwrap()), &as_user(&s.owner)).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[sqlx::test]

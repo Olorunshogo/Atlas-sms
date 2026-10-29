@@ -18,6 +18,8 @@ pub enum NotificationKind {
     ExpenseSubmitted,
     ExpenseApproved,
     ExpenseRejected,
+    ApprovalRequested,
+    ApprovalDecided,
 }
 
 #[derive(Debug, sqlx::Type, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
@@ -59,9 +61,10 @@ pub struct MarkedRead {
     pub updated: u64,
 }
 
-/// Who an event reaches: holders of a permission at a store, or one named user.
+/// Who an event reaches: holders of a permission at a store, holders of it business-wide, or one named user.
 pub enum Audience {
     Permission { permission: &'static str, store_id: Uuid },
+    TenantPermission { permission: &'static str },
     User(Uuid),
 }
 

@@ -30,6 +30,7 @@ pub async fn update_business_details(
 ) -> Result<Json<ApiEnvelope<Tenant>>, ApiError> {
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
     roles::service::assert_permission(&mut tx, user_id, tenant_id, None, "tenant.manage").await?;
+    let before = audit::snapshot(&mut tx, "tenants", "id", tenant_id).await?;
     let tenant = service::update_business_details(
         &mut tx,
         tenant_id,
@@ -37,7 +38,11 @@ pub async fn update_business_details(
         body.tax_identification_number.as_deref(),
     )
     .await?;
-    audit::record(&mut tx, tenant_id, user_id, "tenant", tenant_id, "tenant.business_details", serde_json::to_value(&tenant).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "tenant", entity_id: tenant_id, action: "tenant.business_details", table: "tenants", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Business details updated.", tenant)));
 }

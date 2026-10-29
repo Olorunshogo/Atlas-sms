@@ -3,10 +3,12 @@
  * Writes need `stock.adjust` at the store, reads `stock.view`.
  */
 use axum::extract::Query;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::approvals;
@@ -64,7 +66,7 @@ pub struct ExpiryQuery {
     pub within_days: Option<i32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WriteOffRequest {
     pub store_id: Uuid,
     pub product_id: Uuid,
@@ -177,7 +179,7 @@ pub async fn list_expiring(mut tx: TenantTx, Query(query): Query<ExpiryQuery>) -
 }
 
 /// `POST /api/v1/stock/write-offs`. Takes goods out of saleable stock and records them as unsellable; can't overdraw on-hand.
-pub async fn write_off(mut tx: TenantTx, Json(body): Json<WriteOffRequest>) -> Result<Json<ApiEnvelope<UnsellableStock>>, ApiError> {
+pub async fn write_off(mut tx: TenantTx, Json(body): Json<WriteOffRequest>) -> Result<Response, ApiError> {
     assert_at(&mut tx, body.store_id, "stock.adjust").await?;
     if !WRITE_OFF_CONDITIONS.contains(&body.condition.as_str()) {
         return Err(ApiError::bad_request_with_code("condition must be opened, damaged, defective or expired", "VALIDATION_FAILED"));
@@ -188,11 +190,42 @@ pub async fn write_off(mut tx: TenantTx, Json(body): Json<WriteOffRequest>) -> R
     let reason = required_text("reason", &body.reason, 500)?;
     inventory::batches::check_batch_given(&mut tx, body.product_id, body.stock_item_id).await?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
-    approvals::assert_within_threshold(&mut tx, tenant_id, body.store_id, user_id, approvals::Threshold::WriteOff, body.quantity).await?;
+    let measure = approvals::Measure::Quantity(body.quantity);
+    if approvals::needs_approval(&mut tx, tenant_id, Some(body.store_id), user_id, approvals::Operation::WriteOff, measure).await? {
+        let held = approvals::hold(
+            &mut tx,
+            approvals::Hold {
+                tenant_id,
+                store_id: Some(body.store_id),
+                operation: approvals::Operation::WriteOff,
+                subject_id: body.product_id,
+                payload: serde_json::to_value(&body).map_err(|e| ApiError::Internal(e.to_string()))?,
+                summary: format!("Write off {} ({}): {}", body.quantity.normalize(), body.condition, reason),
+                requested_by_user_id: user_id,
+                message: "Write-off held for approval.",
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok(held);
+    }
+    let record = apply_write_off(&mut tx, tenant_id, user_id, &body, None).await?;
+    tx.commit().await?;
+    return Ok(Json(ApiEnvelope::ok("Stock written off.", record)).into_response());
+}
 
+/// Posts the write-off, records the unsellable stock and its audit row. Also how an approved request applies.
+pub async fn apply_write_off(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    body: &WriteOffRequest,
+    approval: Option<audit::Approval>,
+) -> Result<UnsellableStock, ApiError> {
+    let reason = required_text("reason", &body.reason, 500)?;
     let lines = [PostingLine { product_id: body.product_id, stock_item_id: body.stock_item_id, unit_id: None, quantity: body.quantity }];
     let movements = inventory::service::post(
-        &mut tx,
+        &mut *conn,
         Posting {
             tenant_id,
             store_id: body.store_id,
@@ -223,11 +256,11 @@ pub async fn write_off(mut tx: TenantTx, Json(body): Json<WriteOffRequest>) -> R
     .bind(movements[0].id)
     .bind(&reason)
     .bind(user_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-    audit::record(&mut tx, tenant_id, user_id, "unsellable_stock", record.id, "stock.write_off", serde_json::to_value(&record).ok()).await?;
-    tx.commit().await?;
-    return Ok(Json(ApiEnvelope::ok("Stock written off.", record)));
+    let after = audit::with_approval(serde_json::to_value(&record).ok(), approval);
+    audit::record(conn, tenant_id, user_id, "unsellable_stock", record.id, "stock.write_off", after).await?;
+    return Ok(record);
 }
 
 /// `GET /api/v1/stock/unsellable?store_id=`. Write-offs and non-restocked returns, newest first.

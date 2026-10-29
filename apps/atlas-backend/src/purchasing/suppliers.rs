@@ -273,6 +273,7 @@ pub async fn update_supplier(
     };
     check_terms(body.payment_terms_days)?;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    let before = audit::snapshot(&mut tx, "suppliers", "id", supplier_id).await?;
     let supplier = sqlx::query_as::<_, Supplier>(&format!(
         "UPDATE atlas.suppliers
          SET name = COALESCE($2, name), code = COALESCE($3, code), phone = COALESCE($4, phone),
@@ -292,7 +293,11 @@ pub async fn update_supplier(
     .await
     .map_err(duplicate_code)?
     .ok_or_else(|| ApiError::not_found("Supplier not found."))?;
-    audit::record(&mut tx, tenant_id, user_id, "supplier", supplier.id, "supplier.update", serde_json::to_value(&supplier).ok()).await?;
+    audit::record_edit(
+        &mut tx,
+        audit::Edit { tenant_id, actor_user_id: user_id, entity_type: "supplier", entity_id: supplier.id, action: "supplier.update", table: "suppliers", key: "id", before },
+    )
+    .await?;
     tx.commit().await?;
     return Ok(Json(ApiEnvelope::ok("Supplier updated.", supplier)));
 }

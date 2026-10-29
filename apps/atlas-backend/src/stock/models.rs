@@ -9,7 +9,7 @@ pub struct StockLevel {
     pub on_hand: Decimal,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AdjustStockRequest {
     pub store_id: Uuid,
     pub product_id: Uuid,

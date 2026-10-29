@@ -1,7 +1,7 @@
 /*!
  * FR-25 operational reports. Each is limited to the stores where the caller holds `report.view`; naming any
  * other store is a 403. Revenue, collected payments, refunds, expenses, inventory value and profit are kept as
- * separate figures, never folded into one another. Every report also exports as CSV with `format=csv` (FR-28).
+ * separate figures, never folded into one another. Every report also downloads as CSV (`format=csv`) or PDF (`format=pdf`) (FR-28).
  *
  * Definitions: revenue counts completed sales, by when they completed. Net revenue is revenue less tax. Cost of
  * goods uses the unit cost each line was sold at. Collected is succeeded payments by when they were taken;
@@ -34,7 +34,11 @@ pub struct ReportQuery {
     pub category_id: Option<Uuid>,
     pub supplier_id: Option<Uuid>,
     pub cashier_user_id: Option<Uuid>,
-    /// `csv` for a download; JSON otherwise.
+    /// Stock movements only: `sale`, `adjustment`, `transfer_out`, ...
+    pub movement_type: Option<String>,
+    /// Stock movements only: the sale, transfer, order or count that caused them.
+    pub reference_id: Option<Uuid>,
+    /// `csv` or `pdf` for a download; JSON otherwise.
     pub format: Option<String>,
 }
 
@@ -68,6 +72,17 @@ fn opt<T: ToString>(value: &Option<T>) -> String {
 }
 
 fn respond<R: CsvRow + Serialize>(query: &ReportQuery, name: &str, message: &str, rows: Vec<R>) -> Response {
+    if query.format.as_deref() == Some("pdf") {
+        let cells: Vec<Vec<String>> = rows.iter().map(CsvRow::cells).collect();
+        return (
+            [
+                (header::CONTENT_TYPE, "application/pdf".to_string()),
+                (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}.pdf\"", name)),
+            ],
+            crate::pdf::table(message.trim_end_matches(" generated."), R::header(), &cells),
+        )
+            .into_response();
+    }
     if query.format.as_deref() == Some("csv") {
         return (
             [
@@ -310,8 +325,8 @@ pub async fn summary(mut tx: TenantTx, Query(query): Query<ReportQuery>) -> Resu
         rows.push(StoreMetrics { store_id: *store_id, store_name: names.get(store_id).cloned().unwrap_or_default(), metrics });
     }
     tx.commit().await?;
-    if query.format.as_deref() == Some("csv") {
-        return Ok(respond(&query, "summary", "", rows));
+    if matches!(query.format.as_deref(), Some("csv" | "pdf")) {
+        return Ok(respond(&query, "summary", "Summary generated.", rows));
     }
     return Ok(Json(ApiEnvelope::ok("Summary generated.", Summary { from: query.from, to: query.to, totals, stores: rows })).into_response());
 }
@@ -517,7 +532,7 @@ impl CsvRow for CategoryExpenses {
     }
 }
 
-/// `GET /api/v1/reports/expenses-by-category?from=&to=&store_id=&format=`. Approved expenses only, by expense date.
+/// `GET /api/v1/reports/expenses-by-category?from=&to=&store_id=&category_id=&format=`. Approved expenses only, by expense date.
 pub async fn expenses_by_category(mut tx: TenantTx, Query(query): Query<ReportQuery>) -> Result<Response, ApiError> {
     let stores = report_stores(&mut tx, query.store_id).await?;
     let rows = sqlx::query_as::<_, CategoryExpenses>(
@@ -528,14 +543,258 @@ pub async fn expenses_by_category(mut tx: TenantTx, Query(query): Query<ReportQu
          FROM atlas.expenses e JOIN atlas.expense_categories c ON c.id = e.category_id
          WHERE e.store_id = ANY($1) AND e.status = 'approved'
            AND ($2::timestamptz IS NULL OR e.expense_date::timestamptz >= $2) AND ($3::timestamptz IS NULL OR e.expense_date::timestamptz < $3)
+           AND ($4::uuid IS NULL OR e.category_id = $4)
          GROUP BY e.store_id, e.category_id, c.name
          ORDER BY approved_minor DESC, c.name",
     )
     .bind(&stores)
     .bind(query.from)
     .bind(query.to)
+    .bind(query.category_id)
     .fetch_all(&mut *tx)
     .await?;
     tx.commit().await?;
     return Ok(respond(&query, "expenses-by-category", "Expenses by category generated.", rows));
+}
+
+// === Stock movements
+
+/// The most rows one movement report returns; narrow the filters for more.
+const MOVEMENT_ROWS: i64 = 5_000;
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct MovementRow {
+    pub created_at: DateTime<Utc>,
+    pub store_id: Uuid,
+    pub product_id: Uuid,
+    pub product_name: String,
+    pub stock_item_id: Option<Uuid>,
+    pub movement_type: String,
+    pub quantity: Decimal,
+    pub reason: String,
+    pub reference_id: Option<Uuid>,
+    pub created_by_user_id: Uuid,
+}
+
+impl CsvRow for MovementRow {
+    fn header() -> &'static [&'static str] {
+        return &["created_at", "store_id", "product_id", "product_name", "stock_item_id", "movement_type", "quantity", "reason", "reference_id", "created_by_user_id"];
+    }
+
+    fn cells(&self) -> Vec<String> {
+        return vec![
+            self.created_at.to_rfc3339(), self.store_id.to_string(), self.product_id.to_string(), self.product_name.clone(),
+            opt(&self.stock_item_id), self.movement_type.clone(), self.quantity.normalize().to_string(), self.reason.clone(),
+            opt(&self.reference_id), self.created_by_user_id.to_string(),
+        ];
+    }
+}
+
+/// `GET /api/v1/reports/stock-movements?from=&to=&store_id=&product_id=&category_id=&movement_type=&reference_id=&format=`. Newest first.
+pub async fn stock_movements(mut tx: TenantTx, Query(query): Query<ReportQuery>) -> Result<Response, ApiError> {
+    let stores = report_stores(&mut tx, query.store_id).await?;
+    let rows = sqlx::query_as::<_, MovementRow>(
+        "SELECT m.created_at, m.store_id, m.product_id, p.name AS product_name, m.stock_item_id, m.movement_type::text AS movement_type,
+                m.quantity, m.reason, m.reference_id, m.created_by_user_id
+         FROM atlas.stock_movements m JOIN atlas.products p ON p.id = m.product_id
+         WHERE m.store_id = ANY($1)
+           AND ($2::timestamptz IS NULL OR m.created_at >= $2) AND ($3::timestamptz IS NULL OR m.created_at < $3)
+           AND ($4::uuid IS NULL OR m.product_id = $4)
+           AND ($5::uuid IS NULL OR p.category_id = $5)
+           AND ($6::text IS NULL OR m.movement_type::text = $6)
+           AND ($7::uuid IS NULL OR m.reference_id = $7)
+         ORDER BY m.created_at DESC, m.id DESC
+         LIMIT $8",
+    )
+    .bind(&stores)
+    .bind(query.from)
+    .bind(query.to)
+    .bind(query.product_id)
+    .bind(query.category_id)
+    .bind(query.movement_type.as_deref())
+    .bind(query.reference_id)
+    .bind(MOVEMENT_ROWS)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    return Ok(respond(&query, "stock-movements", "Stock movements generated.", rows));
+}
+
+// === Transfers
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct TransferRow {
+    pub transfer_id: Uuid,
+    pub from_store_id: Uuid,
+    pub to_store_id: Uuid,
+    pub product_id: Uuid,
+    pub product_name: String,
+    pub quantity: Decimal,
+    pub status: String,
+    pub requested_at: DateTime<Utc>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    pub received_at: Option<DateTime<Utc>>,
+}
+
+impl CsvRow for TransferRow {
+    fn header() -> &'static [&'static str] {
+        return &["transfer_id", "from_store_id", "to_store_id", "product_id", "product_name", "quantity", "status", "requested_at", "dispatched_at", "received_at"];
+    }
+
+    fn cells(&self) -> Vec<String> {
+        return vec![
+            self.transfer_id.to_string(), self.from_store_id.to_string(), self.to_store_id.to_string(), self.product_id.to_string(),
+            self.product_name.clone(), self.quantity.normalize().to_string(), self.status.clone(), self.requested_at.to_rfc3339(),
+            self.dispatched_at.map(|t| t.to_rfc3339()).unwrap_or_default(), self.received_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+        ];
+    }
+}
+
+/// `GET /api/v1/reports/transfers?from=&to=&store_id=&product_id=&format=`. Transfers in or out of the stores, by when they were requested.
+pub async fn transfers(mut tx: TenantTx, Query(query): Query<ReportQuery>) -> Result<Response, ApiError> {
+    let stores = report_stores(&mut tx, query.store_id).await?;
+    let rows = sqlx::query_as::<_, TransferRow>(
+        "SELECT t.id AS transfer_id, t.from_store_id, t.to_store_id, t.product_id, p.name AS product_name, t.quantity,
+                t.status::text AS status, t.requested_at, t.dispatched_at, t.received_at
+         FROM atlas.stock_transfers t JOIN atlas.products p ON p.id = t.product_id
+         WHERE (t.from_store_id = ANY($1) OR t.to_store_id = ANY($1))
+           AND ($2::timestamptz IS NULL OR t.requested_at >= $2) AND ($3::timestamptz IS NULL OR t.requested_at < $3)
+           AND ($4::uuid IS NULL OR t.product_id = $4)
+         ORDER BY t.requested_at DESC, t.id DESC",
+    )
+    .bind(&stores)
+    .bind(query.from)
+    .bind(query.to)
+    .bind(query.product_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    return Ok(respond(&query, "transfers", "Transfers generated.", rows));
+}
+
+// === Returns
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ReturnRow {
+    pub return_id: Uuid,
+    pub return_number: Option<String>,
+    pub store_id: Uuid,
+    pub sale_id: Uuid,
+    pub status: String,
+    pub reason_code: String,
+    pub refund_method: String,
+    pub refund_total_minor: i64,
+    pub cashier_user_id: Uuid,
+    pub requested_by_user_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+impl CsvRow for ReturnRow {
+    fn header() -> &'static [&'static str] {
+        return &[
+            "return_id", "return_number", "store_id", "sale_id", "status", "reason_code", "refund_method", "refund_total_minor",
+            "cashier_user_id", "requested_by_user_id", "created_at", "completed_at",
+        ];
+    }
+
+    fn cells(&self) -> Vec<String> {
+        return vec![
+            self.return_id.to_string(), opt(&self.return_number), self.store_id.to_string(), self.sale_id.to_string(),
+            self.status.clone(), self.reason_code.clone(), self.refund_method.clone(), self.refund_total_minor.to_string(),
+            self.cashier_user_id.to_string(), self.requested_by_user_id.to_string(), self.created_at.to_rfc3339(),
+            self.completed_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+        ];
+    }
+}
+
+/// `GET /api/v1/reports/returns?from=&to=&store_id=&product_id=&cashier_user_id=&format=`. By when they were raised; `cashier_user_id` is who rang up the sale.
+pub async fn returns(mut tx: TenantTx, Query(query): Query<ReportQuery>) -> Result<Response, ApiError> {
+    let stores = report_stores(&mut tx, query.store_id).await?;
+    let rows = sqlx::query_as::<_, ReturnRow>(
+        "SELECT r.id AS return_id, r.return_number, r.store_id, r.sale_id, r.status::text AS status, r.reason_code,
+                r.refund_method::text AS refund_method, r.refund_total_minor, s.cashier_user_id, r.requested_by_user_id,
+                r.created_at, r.completed_at
+         FROM atlas.returns r JOIN atlas.sales s ON s.id = r.sale_id
+         WHERE r.store_id = ANY($1)
+           AND ($2::timestamptz IS NULL OR r.created_at >= $2) AND ($3::timestamptz IS NULL OR r.created_at < $3)
+           AND ($4::uuid IS NULL OR s.cashier_user_id = $4)
+           AND ($5::uuid IS NULL OR EXISTS (
+                 SELECT 1 FROM atlas.return_lines rl JOIN atlas.sale_lines sl ON sl.id = rl.sale_line_id
+                 WHERE rl.return_id = r.id AND sl.product_id = $5))
+         ORDER BY r.created_at DESC, r.id DESC",
+    )
+    .bind(&stores)
+    .bind(query.from)
+    .bind(query.to)
+    .bind(query.cashier_user_id)
+    .bind(query.product_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    return Ok(respond(&query, "returns", "Returns generated.", rows));
+}
+
+// === Payments by method
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct MethodPayments {
+    pub store_id: Uuid,
+    pub method: String,
+    pub payments_count: i64,
+    pub collected_minor: i64,
+    pub refunded_minor: i64,
+    pub net_minor: i64,
+}
+
+impl CsvRow for MethodPayments {
+    fn header() -> &'static [&'static str] {
+        return &["store_id", "method", "payments_count", "collected_minor", "refunded_minor", "net_minor"];
+    }
+
+    fn cells(&self) -> Vec<String> {
+        return vec![
+            self.store_id.to_string(), self.method.clone(), self.payments_count.to_string(), self.collected_minor.to_string(),
+            self.refunded_minor.to_string(), self.net_minor.to_string(),
+        ];
+    }
+}
+
+/**
+ * `GET /api/v1/reports/payments-by-method?from=&to=&store_id=&cashier_user_id=&format=`. Collected is succeeded payments
+ * by when they were taken, refunded is executed refunds by when they ran - the same definitions as the summary.
+ * `cashier_user_id` is who took the payment.
+ */
+pub async fn payments_by_method(mut tx: TenantTx, Query(query): Query<ReportQuery>) -> Result<Response, ApiError> {
+    let stores = report_stores(&mut tx, query.store_id).await?;
+    let rows = sqlx::query_as::<_, MethodPayments>(
+        "WITH collected AS (
+             SELECT s.store_id, p.method::text AS method, COUNT(*)::bigint AS payments, SUM(p.amount_minor)::bigint AS amount
+             FROM atlas.payments p JOIN atlas.sales s ON s.id = p.sale_id
+             WHERE s.store_id = ANY($1) AND p.status IN ('succeeded', 'partially_refunded', 'refunded')
+               AND ($2::timestamptz IS NULL OR p.created_at >= $2) AND ($3::timestamptz IS NULL OR p.created_at < $3)
+               AND ($4::uuid IS NULL OR p.received_by_user_id = $4)
+             GROUP BY s.store_id, p.method
+         ), refunded AS (
+             SELECT s.store_id, pm.kind::text AS method, SUM(r.amount_minor)::bigint AS amount
+             FROM atlas.refunds r JOIN atlas.sales s ON s.id = r.sale_id JOIN atlas.payment_methods pm ON pm.id = r.payment_method_id
+             WHERE s.store_id = ANY($1) AND r.status = 'executed'
+               AND ($2::timestamptz IS NULL OR r.created_at >= $2) AND ($3::timestamptz IS NULL OR r.created_at < $3)
+               AND ($4::uuid IS NULL OR r.executed_by_user_id = $4)
+             GROUP BY s.store_id, pm.kind
+         )
+         SELECT COALESCE(c.store_id, f.store_id) AS store_id, COALESCE(c.method, f.method) AS method,
+                COALESCE(c.payments, 0)::bigint AS payments_count, COALESCE(c.amount, 0)::bigint AS collected_minor,
+                COALESCE(f.amount, 0)::bigint AS refunded_minor, (COALESCE(c.amount, 0) - COALESCE(f.amount, 0))::bigint AS net_minor
+         FROM collected c FULL JOIN refunded f ON f.store_id = c.store_id AND f.method = c.method
+         ORDER BY store_id, collected_minor DESC",
+    )
+    .bind(&stores)
+    .bind(query.from)
+    .bind(query.to)
+    .bind(query.cashier_user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    return Ok(respond(&query, "payments-by-method", "Payments by method generated.", rows));
 }

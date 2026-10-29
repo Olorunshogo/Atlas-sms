@@ -15,6 +15,7 @@ use crate::audit;
 use crate::error::ApiError;
 use crate::extractors::{AdminTx, TenantTx};
 use crate::integrations::{ShipmentRequest, ShipmentState};
+use crate::notifications::service as notifications;
 use crate::response::ApiEnvelope;
 use crate::roles;
 use crate::state::AppState;
@@ -110,9 +111,16 @@ pub async fn ship(State(state): State<AppState>, Path(order_id): Path<Uuid>, mut
         .integrations
         .courier
         .create_shipment(&ShipmentRequest { order_number: order.order_number.clone(), address: order.delivery_address.clone(), weight_kg: order.weight_kg })
-        .await
-        .map_err(|err| ApiError::conflict_with_code(format!("The courier couldn't take the shipment: {}", err), "COURIER_FAILED"))?;
+        .await;
     let (tenant_id, user_id) = (tx.tenant_id, tx.user_id);
+    let booking = match booking {
+        Ok(booking) => booking,
+        Err(err) => {
+            let detail = format!("The courier couldn't take order {}: {}", order.order_number, err);
+            notifications::record_issue_detached(&state.pool, tenant_id, "courier_failed", &detail, Some(order_id)).await;
+            return Err(ApiError::conflict_with_code(format!("The courier couldn't take the shipment: {}", err), "COURIER_FAILED"));
+        }
+    };
     let shipment_id = Uuid::now_v7();
     sqlx::query("INSERT INTO atlas.shipments (id, tenant_id, order_id, courier, tracking_number, label_url) VALUES ($1, $2, $3, $4, $5, $6)")
         .bind(shipment_id)

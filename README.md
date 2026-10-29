@@ -10,7 +10,7 @@ Nx-powered monorepo for Atlas, a multi-store management platform: one system tha
 .
 ├── apps/
 │   ├── atlas-backend/          # Rust/Axum/sqlx API
-│   ├── atlas-web/        # Nuxt - public site, auth, owner/manager dashboard
+│   ├── atlas-web/              # Nuxt - public site, auth, owner/manager dashboard
 │   └── atlas-pos/              # Ionic/Capacitor - till login and session home
 │
 ├── packages/atlas-ui/

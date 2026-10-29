@@ -359,6 +359,14 @@ pub async fn store_settings(router: &Router, token: &str, store_id: Uuid, settin
     assert_eq!(status, StatusCode::OK, "{}", body);
 }
 
+/// Sets an approval policy; `limit` is the one limit field, e.g. `json!({ "limit_quantity": "10" })`. `store_id: None` is business-wide.
+pub async fn approval_policy(router: &Router, token: &str, store_id: Option<Uuid>, operation: &str, limit: Value) {
+    let mut body = json!({ "store_id": store_id, "operation": operation });
+    body.as_object_mut().unwrap().extend(limit.as_object().unwrap().clone());
+    let (status, body) = call(router, "PUT", "/api/v1/approval-policies", Some(&as_user(token)), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", body);
+}
+
 /// A sellable product: created, listed at `store_id`, priced per base unit, with `stock` on hand.
 #[allow(clippy::too_many_arguments)]
 pub async fn sellable(
